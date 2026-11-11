@@ -1,5 +1,5 @@
-/* STM32G491RET6 memory layout, verified against the datasheet
- * (DS13122 Rev 2, STM32G491xC/xE, section 3.5 "Embedded SRAM"):
+/* STM32G491RET6 memory layout, verified against the reference manual
+ * (RM0440 Rev 9, section 2.4 "Embedded SRAM", category 4 devices):
  *   FLASH : 512 Kbytes @ 0x08000000
  *   SRAM  : 112 Kbytes total, contiguous at 0x20000000:
  *           - SRAM1  80K @ 0x20000000 (first 32K with hardware parity)

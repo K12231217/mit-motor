@@ -65,7 +65,8 @@ cargo run --release   # probe-rs run --chip STM32G491RETx --connect-under-reset
 5. **`memory.x` is hand-written, and embassy's `memory-x` feature is
    off — deliberately.** The auto-generated memory.x from
    stm32-metapac 15.0.0 lists RAM = 32K for `stm32g491re`, but the
-   datasheet (DS13122 Rev 2, §3.5 "Embedded SRAM") gives 112K total:
+   reference manual (RM0440 Rev 9, §2.4 "Embedded SRAM", category 4
+   devices) gives 112K total:
    SRAM1 80K @ 0x20000000 (first 32K with hardware parity) +
    SRAM2 16K @ 0x20014000 + CCM SRAM 16K @ 0x10000000 (aliased at
    0x20018000, contiguous after SRAM1+SRAM2). FLASH 512K @ 0x08000000.
@@ -91,6 +92,10 @@ cargo run --release   # probe-rs run --chip STM32G491RETx --connect-under-reset
   angle → electrical angle with the 14 pole pairs.
 - **CAN FD**: FDCAN1, 2 Mbps, MIT-protocol frames; a lower-priority
   RTIC task or interrupt-bound handler.
+- **TIM2 is taken**: embassy's time driver (`time-driver-any`
+  feature) claims TIM2 — and its update interrupt — at
+  `embassy_stm32::init` time, so don't plan TIM2 for PWM or
+  anything else.
 - **Clock**: if the loop needs the full 170 MHz, configure the PLL in
   `embassy_stm32::init(...)` and update the systick frequency (item 3
   above) to the new HCLK.
@@ -98,8 +103,10 @@ cargo run --release   # probe-rs run --chip STM32G491RETx --connect-under-reset
 ## Known unverified items
 
 - `probe-rs` chip name `STM32G491RETx` in `.cargo/config.toml` is
-  not yet checked against `probe-rs chip list`; verify before the
-  first flash (`probe-rs chip list | grep -i g491`).
+  verified (2026-11-11) against probe-rs's own target definitions
+  (`probe-rs/targets/STM32G4_Series.yaml`: `STM32G491RE` lists
+  `STM32G491RETx` as a package variant). First flash on real
+  hardware is still untested (see below).
 - No hardware was attached during this migration: flashing, RTT
   output, and the LED blink have not been run on a real board.
 - The template has no tests yet (`cargo test` for a `no_std` target

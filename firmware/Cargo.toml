@@ -23,10 +23,11 @@
 # memory.x: there is a HAND-WRITTEN memory.x in this directory (not the
 # example's auto-generated one). embassy-stm32's `memory-x` feature is
 # deliberately NOT enabled: stm32-metapac 15.0.0 generates RAM = 32K for
-# stm32g491re, but the datasheet (DS13122 Rev 2, section 3.5) gives
-# 112K total SRAM (SRAM1 80K @ 0x20000000 + SRAM2 16K @ 0x20014000 +
-# CCM 16K @ 0x10000000, aliased at 0x20018000, contiguous at
-# 0x20000000). FLASH 512K @ 0x08000000. See memory.x for the full note.
+# stm32g491re, but the reference manual (RM0440 Rev 9, section 2.4
+# "Embedded SRAM", category 4 devices) gives 112K total SRAM (SRAM1 80K
+# @ 0x20000000 + SRAM2 16K @ 0x20014000 + CCM 16K @ 0x10000000, aliased
+# at 0x20018000, contiguous at 0x20000000). FLASH 512K @ 0x08000000.
+# See memory.x for the full note.
 # Do NOT re-enable `memory-x` alongside this file; the linker would see
 # two memory.x files.
 
