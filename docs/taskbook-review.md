@@ -163,7 +163,7 @@ PA11/PA12 是唯一落点，且 **PA11 同时是 TIM1_BKIN2**——任务书把 
 | 3 | 修 VREF+ 脚号（28）、PE14、ADC4/CAN/CH1N 抢脚、串→并注入、补 OVP/USB/三相端接/BOOT0 | ✅ | taskbook §1–§4；HR 文档 §3 |
 | 4 | 偏置改 4.99 k / 注入改并联、新增 ADC4 外部基准 | ✅ | HR-203/204/205/211 |
 | 5 | architecture §2.2 重写、§8 刹车语义删除 | ✅ | [architecture.md](architecture.md) §2.1/§2.2/§2.4/§5/§8 |
-| 6 | 固件切到 `stm32g474rb` 并验证 | ✅（特性待重跑）| `stm32g474re` 构型下 `cargo build` / `--release` 均通过；debug 64,632 B、release 16,080 B（128 K 的 49 %/12 %）；`rb` 只换 Flash 密度 |
+| 6 | 固件切到 `stm32g474rb` 并验证 | ✅ | `cargo build` / `--release` 均通过；旧工具链 debug 64,632 B / release 16,080 B，gnu nightly 重测 68,732 B / 17,184 B（128 K 的 52 %/13 %）|
 
 仍未关闭的两项（不是外包能解决的）：
 

@@ -24,7 +24,7 @@ V2 板不是为了换 MCU。换 MCU 是换料级改动；V2 板要做的是**补
 | 外设 | 3 ADC | 5 ADC / 7 COMP / 4 DAC / 6 OP-AMP / HRTIM / CORDIC / FMAC | §2.H 的调试设施因此可以白拿 |
 
 核对依据：CubeMX 器件库 `db/mcu/STM32G474R(B-C-E)Tx.xml`、`STM32G491R(C-E)Tx.xml` 两个器件文件
-按脚位比对，以及 PCB14 网表 `pcb/Netlist_PCB14_2026-11-11.tel`（**在 `hw/pcb14` 分支上，本分支没有这个文件**）；`firmware/` 已切到 `stm32g474rb`（同一外设集合的 `stm32g474re` 特性下 `cargo build` / `cargo build --release` 已验证通过，`rb` 特性只换 Flash 密度，待重跑一次）。
+按脚位比对，以及 PCB14 网表 `pcb/Netlist_PCB14_2026-11-11.tel`（**在 `hw/pcb14` 分支上，本分支没有这个文件**）；`firmware/` 已切到 `stm32g474rb`，`cargo build` / `cargo build --release` 在该特性下均已通过（2026-11-15，rustc 1.93.0-nightly gnu；ELF 68,732 B debug / 17,184 B release，镜像 69,320 / 17,768 B，比 1.99.1 的旧数据大约 6 %，来自工具链差异，见 `firmware/README.md`）。
 
 **两条路径，建议都走**：
 - 路径 A（1 天）：现有 PCB14 换焊 G474RBT6，验证固件能否跑起来；
@@ -39,6 +39,9 @@ V2 板不是为了换 MCU。换 MCU 是换料级改动；V2 板要做的是**补
 |---|---|---|
 | debug（仅 blinky + defmt）| **65,216 B** | 50 % |
 | release（同一模板）| **16,664 B** | 13 % |
+
+独立复测（rustc 1.93.0-nightly gnu，`stm32g474rb` 特性）：**69,320 B / 17,768 B**（53 % / 14 %）。
+两次差 ~6 %，来自工具链版本，不是特性差异；两个构型都在 128 K 内链接成功。
 
 **128 K 够不够，取决于构型，不取决于代码量：**
 

@@ -34,25 +34,40 @@ Migrated from the RTIC `embassy-stm32g4` example
 ```sh
 rustup toolchain install stable
 rustup target add thumbv7em-none-eabihf
-cargo build            # debug: 49 % of the 128 KB part (see the table)
+cargo build            # debug: ~53 % of the 128 KB part (see the table)
 cargo build --release  # the acceptance profile
 ```
 
-Section sizes (only blinky + defmt, measured 2026-11-15 with the
-`stm32g474re` feature — `stm32g474rb` selects the same peripheral set and
-the same hand-written `memory.x`, so the sizes are unchanged):
+On Windows the **msvc** host toolchain needs VS Build Tools: without
+`link.exe` + `msvcrt.lib` the host build scripts do not link (Coreutils'
+`link.exe` from Git Bash is not it). A `*-pc-windows-gnu` host toolchain
+with MinGW works with no extra setup — the thumb target itself is linked by
+the bundled `rust-lld` either way:
 
-| profile | .text | .rodata | total | of 128 KiB Flash |
-|---|---|---|---|---|
-| debug | 52,120 | 12,512 | 64,632 B | 49 % |
-| release | 13,884 | 2,196 | 16,080 B | 12 % |
+```sh
+cargo +<gnu-or-msvc>-toolchain build --release
+```
 
-`.data` 112 B + `.bss` 480 B. The template is small; the full application
-is not. At this template's 3.9x debug/release ratio a full app (release
-estimate 40–50 KB) lands at 110–175 KB in a debug build, i.e. **over the
-part**. HIL work therefore has to run release builds, or with `opt-level`
-raised for debug: the budget rule is in
-`../docs/hardware-requirements.md` §1.1.
+Section sizes (only blinky + defmt), two independent measurements:
+
+| toolchain | profile | .text | .rodata | total | of 128 KiB Flash |
+|---|---|---|---|---|---|
+| rustc 1.99.1, `stm32g474re` | debug | 52,120 | 12,512 | 64,632 B | 49 % |
+| rustc 1.99.1, `stm32g474re` | release | 13,884 | 2,196 | 16,080 B | 12 % |
+| rustc 1.93.0-nightly gnu, `stm32g474rb` | debug | 55,268 | 13,464 | 68,732 B | 52 % |
+| rustc 1.93.0-nightly gnu, `stm32g474rb` | release | 14,632 | 2,552 | 17,184 B | 13 % |
+
+The ~6 % difference tracks the toolchain, not the chip feature: `stm32g474rb`
+is the same peripheral set as `stm32g474re` (metapac's chip dirs differ only
+in FLASH size) and the same hand-written `memory.x`, and both builds link
+inside the 128 KB region. Raw `llvm-objcopy -O binary` images: 69,320 B debug
+(53 %), 17,768 B release (14 %); `.data` 112 B + `.bss` 480 B.
+
+The template is small; the full application is not. At this template's
+3.9x debug/release ratio a full app (release estimate 40–50 KB) lands at
+110–175 KB in a debug build, i.e. **over the part**. HIL work therefore has
+to run release builds, or with `opt-level` raised for debug: the budget rule
+is in `../docs/hardware-requirements.md` §1.1.
 
 Flash (not run yet — no G474RBT6 board exists; PCB14 carries a G491RET6):
 
