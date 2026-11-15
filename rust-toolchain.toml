@@ -8,4 +8,4 @@
 [toolchain]
 channel = "nightly-2025-11-05-x86_64-pc-windows-gnu"
 targets = ["thumbv7em-none-eabihf"]
-components = ["rustfmt", "clippy"]
+components = ["rustfmt", "clippy", "llvm-tools"]

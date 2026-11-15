@@ -16,6 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup target add thumbv7em-none-eabihf
+      # `cargo xtask size` uses llvm-size/llvm-objcopy from this component.
+      - run: rustup component add llvm-tools
       - run: cargo xtask fmt-check
       - run: cargo xtask clippy
       - run: cargo xtask rel
