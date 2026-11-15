@@ -1,0 +1,9 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Own workspace: building xtask must never pull in (or hijack) the firmware
+# workspace, and it is always built for the *host*.
+[workspace]

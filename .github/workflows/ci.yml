@@ -1,0 +1,22 @@
+name: firmware
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # rust-toolchain.toml pins a *-pc-windows-gnu host toolchain (the primary
+      # dev box has no MSVC linker). CI runs the portable stable toolchain; the
+      # thumb target is the same, so the build is still representative.
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add thumbv7em-none-eabihf
+      - run: cargo xtask fmt-check
+      - run: cargo xtask clippy
+      - run: cargo xtask rel
+      - run: cargo xtask size

@@ -1,0 +1,11 @@
+# Pinned to the *-pc-windows-gnu host toolchain because this project's primary
+# dev machine has no VS Build Tools: the default msvc toolchain cannot link
+# host build scripts (no link.exe / msvcrt.lib).
+#
+# Escape hatches:
+#   - one-off:   cargo +stable xtask rel
+#   - Linux/mac: RUSTUP_TOOLCHAIN=stable cargo xtask rel   (no windows-gnu host there)
+[toolchain]
+channel = "nightly-2025-11-05-x86_64-pc-windows-gnu"
+targets = ["thumbv7em-none-eabihf"]
+components = ["rustfmt", "clippy"]

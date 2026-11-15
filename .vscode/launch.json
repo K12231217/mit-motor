@@ -1,0 +1,29 @@
+{
+  // Hardware-untested: no G474RBT6 board exists yet. Device names for J-Link
+  // come from the probe's device list; keep this file free of absolute paths.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "G474RB (J-Link)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "jlink",
+      "device": "STM32G474RB",
+      "interface": "swd",
+      "runToEntryPoint": "main",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/firmware/target/thumbv7em-none-eabihf/release/blinky",
+      "preLaunchTask": "xtask: rel"
+    },
+    {
+      "name": "G474RB (attach, no flash)",
+      "type": "cortex-debug",
+      "request": "attach",
+      "servertype": "jlink",
+      "device": "STM32G474RB",
+      "interface": "swd",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/firmware/target/thumbv7em-none-eabihf/release/blinky"
+    }
+  ]
+}

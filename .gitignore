@@ -2,3 +2,6 @@
 # wanted later, un-ignore them individually, e.g.:
 #   !.idea/debug-profiles.json   (CLion 2026.3 keeps debug profiles here)
 .idea/
+
+# xtask is its own workspace, so it has its own build dir.
+/xtask/target/

@@ -1,0 +1,5 @@
+# Single entry point for both IDEs and CI: `cargo xtask <cmd>`.
+# Implemented in Rust (xtask/) so no extra tool (just/make) has to be installed
+# on Windows, Linux or in CI.
+[alias]
+xtask = "run --manifest-path xtask/Cargo.toml --"

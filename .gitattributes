@@ -1,0 +1,11 @@
+# One line-ending policy for every checkout (Windows dev boxes, Linux/RK3566,
+# CI). Without this, core.autocrlf=true on Windows rewrites whole files on the
+# first commit that touches them, and diffs stop being reviewable.
+* text=auto eol=lf
+
+# Genuine binaries: never touch them.
+*.bin   binary
+*.pdf   binary
+*.png   binary
+*.xlsx  binary
+*.epro2 binary

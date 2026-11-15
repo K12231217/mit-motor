@@ -27,6 +27,24 @@
 
 按 ScientistTwo 式的研究闭环做（见 issue #1）：提假设 → 做实验 → 消融对比 → 评审。循环是方法，全自动不是目标：硬件在环实验、物理真实性确认、论文评审都要人来做。
 
+## 开发入口
+
+所有构建/检查/烧录动作只有一处实现：`cargo xtask <cmd>`（`xtask/src/main.rs`）。
+CLion、VS Code、CI 都调它，IDE 配置里不写逻辑。
+
+```sh
+cargo xtask check        # cargo check
+cargo xtask rel          # release 构建（验收构型）
+cargo xtask size         # 打印 .text/.rodata/.data/.bss + 镜像大小与 memory.x 预算占比
+cargo xtask clippy       # -D warnings
+cargo xtask fmt-check    # CI 用
+cargo xtask flash        # probe-rs runner（芯片名在 firmware/.cargo/config.toml）
+cargo xtask rtt          # probe-rs attach，读 defmt/RTT
+```
+
+工具链由 `rust-toolchain.toml` 固定（`nightly-2025-11-05` 的 **windows-gnu** 主机工具链，
+因为本机没有 VS Build Tools；Linux/macOS 上用 `RUSTUP_TOOLCHAIN=stable` 覆盖）。
+
 ## 状态
 
 - 2026-11-08：方案 V1.1 定稿

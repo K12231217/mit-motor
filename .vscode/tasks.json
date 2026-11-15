@@ -1,0 +1,51 @@
+{
+  // Every task is a thin wrapper over `cargo xtask` (xtask/src/main.rs).
+  // No build logic lives here, so CLion/CI cannot drift from VS Code.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "xtask: check",
+      "type": "shell",
+      "command": "cargo xtask check",
+      "problemMatcher": ["$rustc"],
+      "group": "build"
+    },
+    {
+      "label": "xtask: rel",
+      "type": "shell",
+      "command": "cargo xtask rel",
+      "problemMatcher": ["$rustc"],
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "xtask: size",
+      "type": "shell",
+      "command": "cargo xtask size",
+      "problemMatcher": []
+    },
+    {
+      "label": "xtask: clippy",
+      "type": "shell",
+      "command": "cargo xtask clippy",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "xtask: fmt-check",
+      "type": "shell",
+      "command": "cargo xtask fmt-check",
+      "problemMatcher": []
+    },
+    {
+      "label": "xtask: flash",
+      "type": "shell",
+      "command": "cargo xtask flash",
+      "problemMatcher": []
+    },
+    {
+      "label": "xtask: rtt",
+      "type": "shell",
+      "command": "cargo xtask rtt",
+      "problemMatcher": []
+    }
+  ]
+}

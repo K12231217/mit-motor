@@ -1,0 +1,8 @@
+{
+  // Shared settings only. Personal preferences belong in user settings.
+  // The repo root has no Cargo.toml, so point rust-analyzer at the firmware
+  // crate; its target and runner come from firmware/.cargo/config.toml.
+  "rust-analyzer.linkedProjects": ["firmware/Cargo.toml"],
+  "rust-analyzer.check.command": "clippy",
+  "files.eol": "\n"
+}
