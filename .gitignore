@@ -1,0 +1,4 @@
+# CLion / IntelliJ project state. If shared run or debug profiles are
+# wanted later, un-ignore them individually, e.g.:
+#   !.idea/debug-profiles.json   (CLion 2026.3 keeps debug profiles here)
+.idea/
