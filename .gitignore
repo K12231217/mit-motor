@@ -1,7 +1,10 @@
-# CLion / IntelliJ project state. If shared run or debug profiles are
-# wanted later, un-ignore them individually, e.g.:
-#   !.idea/debug-profiles.json   (CLion 2026.3 keeps debug profiles here)
-.idea/
+# CLion / IntelliJ project state. Only the shared, reviewable files are kept:
+# run configurations (text XML, command lines only) and — once CLion writes one —
+# the shared debug profiles JSON. Everything else (workspace.xml, iml, caches)
+# stays local.
+.idea/*
+!.idea/runConfigurations/
+!.idea/debug-profiles.json
 
 # xtask is its own workspace, so it has its own build dir.
 /xtask/target/
