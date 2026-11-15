@@ -26,7 +26,7 @@
 
 | 级 | 检查 | 判据（机器可判）|
 |---|---|---|
-| S0 | 时钟/Flash/RAM/唯一 ID | 170 MHz、512 K 可读、RAM 写读一致 |
+| S0 | 时钟/Flash/RAM/唯一 ID | 170 MHz、128 K 可读、RAM 写读一致 |
 | S1 | GPIO/EXTI 回环 | 输出→输入回环计数一致 |
 | S2 | ADC 通道与量程 | PA4 DAC 斜坡进 J_SYNC，三路读数偏差 ≤ 2 LSB、线性 R² > 0.999 |
 | S3 | ADC 同步性 | 扫触发相位，三路跳变点的相位差 = 偏斜（写入记录）|
@@ -43,7 +43,7 @@
 一个 `board.yaml`，把现在散落在 `hardware-requirements.md` 与原理图里的知识变成可查询事实：
 
 ```yaml
-mcu: STM32G474RET6
+mcu: STM32G474RBT6
 net_divider: { r_series: 100, c_to_gnd: 100p, r_up: 4.99k, r_down: 4.99k, rth: 2.495k }
 sox: { ratio_a_per_amp: 1/9200, volts_per_amp: 0.2712, zero_volts: VREF/2 }
 pins:

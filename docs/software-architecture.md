@@ -55,7 +55,7 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
 2_system/               # 服务层（包名 system），forbid(unsafe)
   src/lib.rs
   src/log.rs            #   try_log：无锁环，满则丢；flush 只在最低优先级
-  src/time.rs           #   TIM2 @1 MHz + 64 位溢出扩展
+  src/time.rs           #   TIM5 @1 MHz + 64 位溢出扩展（TIM2 归 embassy 时基）
   src/queue.rs          #   事件/指令/日志队列封装（容量来自 contracts）
   src/fsm.rs            #   状态机骨架：trait Step + 迁移表
   src/trace.rs          #   Snapshot → TraceFrame 打包（含 flags 位）

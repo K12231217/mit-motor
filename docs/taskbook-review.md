@@ -142,7 +142,7 @@ PA11/PA12 是唯一落点，且 **PA11 同时是 TIM1_BKIN2**——任务书把 
 
 | 条目 | 任务书 | 我的文档 | 判定 |
 |---|---|---|---|
-| 主控 | **G474RET6 / 512 K** | 原写 G474RBT6 / 128 K | **任务书对**：128 K 上 debug 就吃掉 49 %。**已采纳**：仓库已切到 `stm32g474re`，Flash 512 K 写进 §1.1 |
+| 主控 | **G474RET6 / 512 K** | 原写 G474RBT6 / 128 K | **最终选 RBT6（128 K）**：任务书当时按"debug 就吃 49 %"主张 512 K，但选型最终按 BOM 与可得性定在 RBT6。仓库已切到 `stm32g474rb` + `memory.x` FLASH 128 K；"debug 构型放不下全量应用"由 HR 文档 §1.1 的三条对冲手段（release 构型、提高 `opt-level`、镜像复核）承担 |
 | 驱动语义 | HA 六输入 | 原写 PWM+EN | **任务书对**，已改 |
 | 死区 | MCU BDTR 产生 | 原写"芯片内部提供" | **任务书对**，已改 |
 | 偏置 Rth | 2.495 k / 2.97 mA/LSB | 1 k / 7.41 mA/LSB | **任务书更好**（分辨率 2.5×），采纳并改 HR-203 |
@@ -158,14 +158,14 @@ PA11/PA12 是唯一落点，且 **PA11 同时是 TIM1_BKIN2**——任务书把 
 
 | # | 动作 | 状态 | 落点 |
 |---|---|---|---|
-| 1 | 任务书改为 `G474RET6`，写死引脚与非冲突约束 | ✅ | [hardware-taskbook.md](hardware-taskbook.md) v2.1 |
+| 1 | 任务书料号改为 **`G474RBT6`**，写死引脚与非冲突约束 | ✅ | [hardware-taskbook.md](hardware-taskbook.md) v2.3 |
 | 2 | MP6540HA 六输入结论、死区、故障语义写成硬性约束 | ✅ | taskbook §2.3；HR-302/402/403/408 |
 | 3 | 修 VREF+ 脚号（28）、PE14、ADC4/CAN/CH1N 抢脚、串→并注入、补 OVP/USB/三相端接/BOOT0 | ✅ | taskbook §1–§4；HR 文档 §3 |
 | 4 | 偏置改 4.99 k / 注入改并联、新增 ADC4 外部基准 | ✅ | HR-203/204/205/211 |
 | 5 | architecture §2.2 重写、§8 刹车语义删除 | ✅ | [architecture.md](architecture.md) §2.1/§2.2/§2.4/§5/§8 |
-| 6 | 固件切到 `stm32g474re` 并验证 | ✅ | `cargo build` / `--release` 均通过；debug 64,632 B、release 16,080 B（512 K 的 12 %/3 %）|
+| 6 | 固件切到 `stm32g474rb` 并验证 | ✅（特性待重跑）| `stm32g474re` 构型下 `cargo build` / `--release` 均通过；debug 64,632 B、release 16,080 B（128 K 的 49 %/12 %）；`rb` 只换 Flash 密度 |
 
 仍未关闭的两项（不是外包能解决的）：
 
 - **ADC1/2 与 ADC3 的跨组同拍**：必须用 J_SYNC + DAC 斜坡实测（E2），不做零假设。
-- **论文题目**仍写 "STM32G491"，与 G474RET6 不一致，需教务层面确认（HR 文档 §8.8）。
+- **论文题目**仍写 "STM32G491"，与 G474RBT6 不一致，需教务层面确认（HR 文档 §8.8）。

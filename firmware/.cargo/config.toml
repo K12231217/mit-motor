@@ -1,6 +1,8 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-# Chip name as listed in `probe-rs chip list` for STM32G474RET6 (verified).
-runner = "probe-rs run --chip STM32G474RE --connect-under-reset"
+# Chip name as listed in `probe-rs chip list` for STM32G474RBT6
+# (probe-rs 0.31.0 lists STM32G474RB; `--chip STM32G474RE` would also
+# work but names the wrong density).
+runner = "probe-rs run --chip STM32G474RB --connect-under-reset"
 
 [build]
 # Cortex-M4F with hardware FPU (was thumbv7m-none-eabi in the example,
