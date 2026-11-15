@@ -38,10 +38,10 @@ mod app {
         let p = embassy_stm32::init(Default::default());
         defmt::info!("Hello World!");
 
-        // TODO(board): PC6 is carried over from the RTIC example as a
-        // placeholder. Replace it with the actual LED pin from the board
-        // schematic when the driver board is finalized.
-        let mut led = Output::new(p.PC6, Level::High, Speed::Low);
+        // TODO(board): LED is PB2 per docs/hardware-requirements.md §3
+        // (HR-505). PCB14 has no MCU-driven LED and the example's PC6 is
+        // unrouted there. Keep in sync with the schematic.
+        let mut led = Output::new(p.PB2, Level::High, Speed::Low);
         defmt::info!("high");
         led.set_high();
 
@@ -52,7 +52,7 @@ mod app {
     }
 
     #[task()]
-    async fn blink(_cx: blink::Context, mut led: Output<'static, embassy_stm32::peripherals::PC6>) {
+    async fn blink(_cx: blink::Context, mut led: Output<'static, embassy_stm32::peripherals::PB2>) {
         let mut state = true;
         loop {
             defmt::info!("blink");

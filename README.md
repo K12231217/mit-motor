@@ -4,7 +4,7 @@
 
 ## 硬件
 
-- MCU：STM32G491RET6（512K Flash，三路独立 ADC）
+- MCU：STM32G474RET6（LQFP64，512K Flash / 128K SRAM；5 个 ADC 中引出 3 个用于相电流）
 - 驱动：MPS MP6540HA 三相集成驱动（5.5–50 V，内部低边 SOx 比例电流输出）
 - 电机：WK4310 无框电机，14 对极
 - 减速：单级行星 8:1
@@ -30,4 +30,5 @@
 ## 状态
 
 - 2026-11-08：方案 V1.1 定稿
+- 2026-11-15：主控定稿 G474RET6（LQFP64，512K Flash / 128K SRAM，与 PCB14 的 G491RET6 同封装、引脚功能逐脚兼容）；驱动确认为 MP6540HA（`MP6540HGU-A-Z`，HS/LS 六输入）。V2 板需求与验收见 [docs/hardware-requirements.md](docs/hardware-requirements.md)，对外包的任务书见 [docs/hardware-taskbook.md](docs/hardware-taskbook.md)，任务书错误清单见 [docs/taskbook-review.md](docs/taskbook-review.md)，交给 agent 开发前还缺什么见 [docs/agent-readiness.md](docs/agent-readiness.md)，固件文件架构（五 crate）见 [docs/software-architecture.md](docs/software-architecture.md)
 - 进行中：第一部分——文献与缺口分析（issue #1）

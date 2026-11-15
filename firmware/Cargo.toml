@@ -4,8 +4,12 @@
 # (rtic-rs/rtic, master @ 832307d81450b87e6264f343eb419870957cbf7d,
 #  examples/embassy-stm32g4).
 #
-# What changed for this project (STM32G491RET6):
-# - `embassy-stm32` chip feature: `stm32g431cb` -> `stm32g491re`
+# What changed for this project (STM32G474RET6, LQFP64, 512K Flash):
+# - `embassy-stm32` chip feature: `stm32g431cb` -> `stm32g491re` ->
+#   `stm32g474rb` -> **`stm32g474re`**. The control MCU was re-picked on
+#   2026-11-15: G474RET6 (512K) is pin-identical to G474RBT6 but has 4x
+#   the Flash, and the debug profile alone eats half of the 128K part.
+#   The V2 board pin map is docs/hardware-requirements.md §3.
 # - `rtic` / `rtic-monotonics` / `rtic-sync`: path dependencies on the RTIC
 #   workspace (`../../rtic`, ...) replaced by crates.io dependencies at the
 #   SAME versions the example used (rtic 2.4.0, rtic-monotonics 3.0.0,
@@ -22,11 +26,11 @@
 #
 # memory.x: there is a HAND-WRITTEN memory.x in this directory (not the
 # example's auto-generated one). embassy-stm32's `memory-x` feature is
-# deliberately NOT enabled: stm32-metapac 15.0.0 generates RAM = 32K for
-# stm32g491re, but the datasheet (DS13122 Rev 2, section 3.5) gives
-# 112K total SRAM (SRAM1 80K @ 0x20000000 + SRAM2 16K @ 0x20014000 +
-# CCM 16K @ 0x10000000, aliased at 0x20018000, contiguous at
-# 0x20000000). FLASH 512K @ 0x08000000. See memory.x for the full note.
+# deliberately NOT enabled: stm32-metapac 15.0.0 gets the G4 SRAM wrong
+# (32K for stm32g491re, 96K for stm32g474rb/re; both understate the part),
+# so the generator is not authoritative. G474RET6 as built: FLASH 512K @
+# 0x08000000; SRAM1 80K + SRAM2 32K contiguous at 0x20000000 (112K);
+# CCM 16K @ 0x10000000 (no DMA access). See memory.x for the full note.
 # Do NOT re-enable `memory-x` alongside this file; the linker would see
 # two memory.x files.
 
@@ -50,7 +54,7 @@ features = ["cortex-m-systick"]
 version = "1.6.0"
 
 [dependencies]
-embassy-stm32 = { version = "0.1.0", features = [ "defmt", "time-driver-any", "stm32g491re", "unstable-pac", "exti"]  }
+embassy-stm32 = { version = "0.1.0", features = [ "defmt", "time-driver-any", "stm32g474re", "unstable-pac", "exti"]  }
 
 defmt = "0.3"
 defmt-rtt = "0.4"
