@@ -40,6 +40,10 @@ pub fn run() -> Result<(), String> {
             id: "I3",
             outcome: check_no_heap(),
         },
+        Report {
+            id: "I7",
+            outcome: check_fsm_single_owner(),
+        },
     ];
 
     let mut failed = false;
@@ -62,7 +66,7 @@ pub fn run() -> Result<(), String> {
         // 报告已经打印过，这里不再让 main 追加一条没信息量的 `xtask: `。
         Err(String::new())
     } else {
-        println!("arch_check: PASS —— I1/I2/I3 全部通过");
+        println!("arch_check: PASS —— I1/I2/I3/I7 全部通过");
         Ok(())
     }
 }
@@ -241,6 +245,69 @@ fn check_no_heap() -> Outcome {
     } else {
         Outcome::Fail {
             summary: format!("{} 含分配器符号：", elf.display()),
+            details: hits,
+        }
+    }
+}
+
+/// I7 —— 状态迁移只有一处：`MotorState` 只允许在 `fsm.rs` 与 crate 根出现。
+///
+/// 判据是"命名"而不是"语义"：只要别处拿到 `MotorState`，就能写出第二条迁移路径。
+/// 一条 grep 挡不住逻辑错误，但能挡住"在 CAN 任务里顺手改一下状态"这种最贵的退化。
+fn check_fsm_single_owner() -> Outcome {
+    const ALLOWED: [&str; 4] = [
+        "0_contracts/src/fsm.rs",
+        "0_contracts/src/lib.rs",
+        "3_user/src/fsm.rs",
+        "3_user/src/lib.rs",
+    ];
+    const NEEDLE: &str = "MotorState";
+
+    let mut files = Vec::new();
+    for root in SCAN_ROOTS {
+        if let Err(e) = collect_rs(Path::new(root), &mut files) {
+            return Outcome::Fail {
+                summary: format!("无法扫描 {root}"),
+                details: vec![e.to_string()],
+            };
+        }
+    }
+    files.sort();
+
+    let mut hits = Vec::new();
+    let mut scanned = 0usize;
+    for file in &files {
+        let path = file.to_string_lossy().replace('\\', "/");
+        if ALLOWED.contains(&path.as_str()) {
+            continue;
+        }
+        scanned += 1;
+        let bytes = match std::fs::read(file) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return Outcome::Fail {
+                    summary: format!("无法读取 {}", file.display()),
+                    details: vec![e.to_string()],
+                }
+            }
+        };
+        for (idx, raw) in bytes.split(|b| *b == b'\n').enumerate() {
+            let line = String::from_utf8_lossy(raw);
+            let line = line.trim_end_matches('\r');
+            if line.contains(NEEDLE) {
+                hits.push(format!("{path}:{}:{}", idx + 1, line.trim_end()));
+            }
+        }
+    }
+
+    if hits.is_empty() {
+        Outcome::Pass(format!(
+            "{NEEDLE} 仅在 fsm.rs 与 crate 根出现（扫描 {} 个文件）",
+            scanned
+        ))
+    } else {
+        Outcome::Fail {
+            summary: format!("{NEEDLE} 出现在迁移矩阵之外："),
             details: hits,
         }
     }

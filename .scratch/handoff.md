@@ -12,17 +12,18 @@
 | T-002 | B | workspace 落地（根 `Cargo.toml` = `0_contracts` + `3_user`）、门控估计器搬进 `3_user`、`memory.x` 保守值、`arch` 机器校验 | 事实与证据见 `docs/INDEX.md` §1/§3（ADR-06）、§4 落差 1/3/4 | **DONE**（host 侧，无 HIL） |
 | T-003 | B | `arch_check` 去 bash 依赖：I1/I2/I3 改成 `xtask/src/checks.rs` 内的 Rust 实现，`ci/arch_check.sh` 删除 | 事实与证据见 `docs/INDEX.md` §4 落差 3 | **DONE**（`cargo xtask arch` → 3 PASS） |
 | T-004 | A | 探针：`embassy_stm32::init()` 返回的 `Peripherals` 与裸 PAC `steal()` 的衔接 | 无（探针免脚手架） | **BLOCKED**：无 G474 实板；可先在 host 读 embassy 源码给结论，寄存器行为属 `UNVERIFIED` |
+| T-005 | B | 状态 × 事件迁移矩阵（`3_user/src/fsm.rs` + 类型 `0_contracts/src/fsm.rs`）、状态字 bit 15 `cmd_reject`、清故障窗口、bank 2 标定档案双槽布局、`arch` 增 I7 | 事实与证据见 `docs/INDEX.md` §3 ADR-09、§1 SRAM/算法层行 | **DONE**（host 侧；档案写入路径与制动策略未做，见 ADR-09 失效条件） |
 
-## 2. 本会话验收门（T-002 + T-003）
+## 2. 本会话验收门（T-002 + T-003 + T-005）
 
-2026-11-16 实测，四条命令原文输出摘要：
+2026-11-16 实测，命令原文输出摘要：
 
-- [x] `cargo xtask test`：全绿（`contracts` + `user`，0 ignored；条数以命令输出为准），4 条 `test result` 均 0 failed，exit 0
+- [x] `cargo xtask test`：全绿（`contracts` 32 + `user` 41，0 ignored；条数以命令输出为准），4 条 `test result` 均 0 failed，exit 0
 - [x] `cargo xtask clippy`（`-D warnings`）：`Finished` 无 warning，exit 0
 - [x] `cargo xtask size`：`flash region 65,536 B (64 KiB)`；`flash image 17,768 B (27.1 % used, 47,768 left)`；
       `.text 14,632 / .rodata 2,552 / .data 112 / .bss 480`
-- [x] `cargo xtask arch`：`PASS I1/I2/I3` + `arch_check: PASS —— I1/I2/I3 全部通过`，exit 0（纯 Rust，无 bash）
-- [x] 三个控制文件的数字均可追到上面四条命令或 `firmware/memory.x` / `0_contracts/src/limits.rs`
+- [x] `cargo xtask arch`：`PASS I1/I2/I3/I7` + `arch_check: PASS —— I1/I2/I3/I7 全部通过`，exit 0（I7 已做负向验证：往 `policy.rs` 塞一个 `MotorState` 注释即 FAIL）
+- [x] 三个控制文件的数字均可追到上面四条命令或 `firmware/memory.x` / `0_contracts/src/limits/hw.rs`
 
 ## 3. 最近一次台架实测（HIL）
 
@@ -39,7 +40,9 @@ host 侧无阻塞项；T-004 仍卡在无 G474 实板。
 ## 5. 待裁决（人）
 
 未决清单的唯一来源是 [`docs/INDEX.md`](../docs/INDEX.md) §5（`take_sample` 语义、embassy 衔接、
-`INVALID_SAMPLE_LIMIT`、SRAM/DBANK 一手确认），本文件不复制。活跃 Thread 中只有 T-004 受外部条件（实板）阻塞。
+`INVALID_SAMPLE_LIMIT`、CCM 别名是否启用），本文件不复制。活跃 Thread 中只有 T-004 受外部条件（实板）阻塞。
+下一块待裁：`CalibRecord` 的字段集（`board_id` 96 bit UID + 版本 + 编码器零偏 + OVP 实测点）与 A/B 新旧判定，
+它决定 `1_bsp` 的 flash 驱动接口（ADR-09 只冻结了槽布局）。
 
 ## 6. 归档规则
 

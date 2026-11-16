@@ -58,12 +58,12 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/log.rs            #   try_log：无锁环，满则丢；flush 只在最低优先级
   src/time.rs           #   TIM5 @1 MHz + 64 位溢出扩展（TIM2 归 embassy 时基）
   src/queue.rs          #   事件/指令/日志队列封装（容量来自 contracts）
-  src/fsm.rs            #   状态机骨架：trait Step + 迁移表
   src/trace.rs          #   Snapshot → TraceFrame 打包（含 flags 位）
   src/watchdog.rs       #   通信中断 > 20 ms 停机
 
 3_user/                 # 纯算法（包名 user），no_std + forbid(unsafe)，x86 可测
   src/lib.rs            #   #![no_std] #![forbid(unsafe_code)]
+  src/fsm.rs            #   状态 × 事件迁移矩阵（纯函数，宿主机全表穷举）
   src/foc.rs            #   Clarke/Park 与逆变换
   src/svpwm.rs          #   七段式 + 占空比夹紧
   src/sense.rs          #   code → 安培（含零位/增益表）
@@ -257,7 +257,9 @@ const _: () = assert!(size_of::<Event>() <= 32);
 3. `grep -rn "unsafe" 0_contracts/src 2_system/src 3_user/src` → 必须为空；
 4. `grep -rn "await\|defmt\|\.lock()" 4_app/src/tasks/current.rs` → 必须为空；
 5. `llvm-nm target/.../app | grep __rust_alloc` → 必须为空；
-6. `cargo build --release && llvm-objcopy -O binary`，统计 Flash/RAM 占用写进 CI 日志。
+6. `cargo build --release && llvm-objcopy -O binary`，统计 Flash/RAM 占用写进 CI 日志；
+7. I7：`MotorState` 只允许在 `0_contracts/src/fsm.rs`、`3_user/src/fsm.rs` 与两处 crate 根出现
+   （其余文件拿到它就能写第二条迁移路径）。
 
 ## 10. 未定项（不影响文件架构，但影响第一行实现）
 

@@ -20,7 +20,7 @@ V2 板不是为了换 MCU。换 MCU 是换料级改动；V2 板要做的是**补
 | 封装 | LQFP64 | **LQFP64** | 同封装，PCB14 可**直接换料**，不必重排信号 |
 | 引脚功能 | G491RET6 | G474RBT6 | G491 在用的 29 个信号功能**全部存在**（功能集合无丢失）|
 | Flash | 512 K | **128 K** | 少 384 K；debug 构型吃 49 %，见 §1.1 的三条对冲手段 |
-| SRAM | 112 K | **128 K**（SRAM1 80 + SRAM2 32 + CCM 16）| CCM 不可被 DMA 访问 |
+| SRAM | 112 K | **128 K**（SRAM1 80 + SRAM2 16 + CCM 32，DS12288 §3.5）| CCM 在 `0x1000_0000` 只有 CPU 可达；同一块内存在 `0x2001_8000` 有 SBUS 别名，DMA1/2 可达 |
 | 外设 | 3 ADC | 5 ADC / 7 COMP / 4 DAC / 6 OP-AMP / HRTIM / CORDIC / FMAC | §2.H 的调试设施因此可以白拿 |
 
 核对依据：CubeMX 器件库 `db/mcu/STM32G474R(B-C-E)Tx.xml`、`STM32G491R(C-E)Tx.xml` 两个器件文件
@@ -69,9 +69,11 @@ RC（256 K）/RE（512 K）与 RBT6 同封装同脚位、只差 Flash 密度：�
    若偏斜不可忽略（> 50 ns），论文表述改为"偏斜固定且可标定"，并给出补偿量与补偿后残差。
 2. **USB FS 时钟**：170 MHz 下 VCO = 340 MHz，PLLQ 只能取 /2/4/6/8（42.5/56.7），得不到 48 MHz。
    V2 用 HSI48 + CRS 供 USB；HSE 16 MHz 只服务 CAN FD 位定时。这是时钟树的前提，不是优化项。
-3. **RAM 的分块**：128 K 总量里 CCM 16 K 不可被 DMA 访问，ADC/SPI/USB 缓冲必须放 SRAM1/SRAM2，
-   黑匣子（HR-814）放在 SRAM2；`stm32-metapac` 对 G4 SRAM 的数字是错的（`g474rb/re` 给 96 K），
-   所以 `memory.x` 必须手写（已做）。
+3. **RAM 的分块**：128 K 总量 = SRAM1 80 K + SRAM2 16 K + CCM 32 K（DS12288 §3.5）。CCM 在
+   `0x1000_0000` 只经 I/D-code 总线供 CPU 使用，DMA 不可达；但同一块内存在 `0x2001_8000` 有
+   SBUS 别名，DMA1/2 可达。ADC/SPI 缓冲放 SRAM1/SRAM2（零等待且无别名歧义），黑匣子（HR-814）
+   放 SRAM2；`stm32-metapac` 对 G4 SRAM 的数字是错的（`g474rb/re` 给 96 K），所以 `memory.x`
+   必须手写（已做）。
 
 ### 1.3 PCB14 缺口清单（V2 板的存在理由）
 
