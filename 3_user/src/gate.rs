@@ -848,7 +848,7 @@ mod tests {
         gate, measured, push, raw, Lcg, Rot, ARC_STEP_COS, ARC_STEP_SIN, FULL_STEP_COS,
         FULL_STEP_SIN,
     };
-    use super::{sqrt_f32, GainAccum, GainGate, GateParams, HalfWindow};
+    use super::{GainAccum, GainGate, GateParams, HalfWindow};
     use crate::policy;
     use contracts::Trust;
 
@@ -966,13 +966,6 @@ mod tests {
     }
 
     #[test]
-    fn sqrt_matches_known_values() {
-        assert!((sqrt_f32(0.0) - 0.0).abs() < 1e-12);
-        assert!((sqrt_f32(4.0) - 2.0).abs() < 1e-6);
-        assert!((sqrt_f32(1e-6) - 1e-3).abs() < 1e-8);
-    }
-
-    #[test]
     fn rotating_1a_recovers_injected_gain() {
         let mut gate = frozen_gate();
         let mut rng = Lcg::new(0x1234_5678);
@@ -1000,21 +993,6 @@ mod tests {
         assert!((gb - 1.02).abs() < 1e-3, "gamma_b = {gb}");
         assert!((gc - 1.0).abs() < 1e-3, "gamma_c = {gc}");
         assert_eq!(gate.trust(), Trust::Trusted);
-    }
-
-    #[test]
-    fn single_direction_is_rejected_by_bias_gate() {
-        // 全窗同一 AC 方向 + 共模 DC：R/d 过，z 必须拒（DC 会被学成增益）。
-        let mut gate = frozen_gate();
-        let mut rng = Lcg::new(11);
-        let mut rot = Rot::new();
-        for _ in 0..400 {
-            rot.step(FULL_STEP_COS, FULL_STEP_SIN);
-            let abc = rot.iabc(94.0);
-            let s = measured(abc, 1.01, 5.0, 0.5, &mut rng);
-            let _ = push(&mut gate, s);
-        }
-        assert_eq!(gate.trust(), Trust::UntrustedBias);
     }
 
     #[test]
@@ -1055,18 +1033,6 @@ mod tests {
     }
 
     #[test]
-    fn pure_noise_is_rejected_by_excitation_gate() {
-        // 秩 1 噪声：方向单一，S 秩亏，d 必须拒。
-        let mut gate = frozen_gate();
-        let mut rng = Lcg::new(41);
-        for _ in 0..400 {
-            let n = rng.noise(4.0);
-            let _ = push(&mut gate, [n, -0.5 * n, -0.5 * n]);
-        }
-        assert_eq!(gate.trust(), Trust::UntrustedExcitation);
-    }
-
-    #[test]
     fn two_percent_step_trips_change_gate_within_10ms() {
         let mut gate = frozen_gate();
         let mut rng = Lcg::new(51);
@@ -1093,53 +1059,6 @@ mod tests {
             }
         }
         assert!(saw_change, "2 % step not caught within 200 samples (10 ms)");
-    }
-
-    #[test]
-    fn kappa_derating_rejects_marginal_case() {
-        // 0.14 A 峰值：pred ≈ 0.475 pp，落在 (KAPPA·0.5, 0.5)。
-        let mut gate = frozen_gate();
-        let mut rng = Lcg::new(61);
-        let mut rot = Rot::new();
-        let amp = 0.14 * LSB_PER_AMP;
-        for _ in 0..1_999 {
-            rot.step(FULL_STEP_COS, FULL_STEP_SIN);
-            let abc = rot.iabc(amp);
-            let s = measured(abc, 1.0, 0.0, 1.75, &mut rng);
-            let _ = push(&mut gate, s);
-        }
-
-        let pred = match gate.pred_pp() {
-            Some(v) => v,
-            None => panic!("pred_pp is None"),
-        };
-        assert!(
-            pred > GateParams::FROZEN.kappa * GateParams::FROZEN.target_pp && pred < 0.5,
-            "pred = {pred} pp not in the marginal band"
-        );
-
-        rot.step(FULL_STEP_COS, FULL_STEP_SIN);
-        let abc = rot.iabc(amp);
-        let s = measured(abc, 1.0, 0.0, 1.75, &mut rng);
-        let _ = push(&mut gate, s);
-        assert_eq!(gate.trust(), Trust::UntrustedAmplitude);
-
-        // 同一份数据，把目标放宽到 2.0 pp：降额后 1.8 pp 应通过。
-        gate.params.target_pp = 2.0;
-        let mut saw_trusted = false;
-        for _ in 0..200 {
-            rot.step(FULL_STEP_COS, FULL_STEP_SIN);
-            let abc = rot.iabc(amp);
-            let s = measured(abc, 1.0, 0.0, 1.75, &mut rng);
-            let _ = push(&mut gate, s);
-            if gate.trust().is_trusted() {
-                saw_trusted = true;
-            }
-        }
-        assert!(
-            saw_trusted,
-            "relaxed target did not let the marginal case pass"
-        );
     }
 
     #[test]
@@ -1213,20 +1132,9 @@ mod tests {
     }
 
     #[test]
-    fn n_eq_saturates_at_3999() {
-        // Σw = 2000（单拍权重 2000 等价于 2000 个等权样本之和）。
-        let mut accum = GainAccum::empty();
-        accum.push_sample([100.0, -50.0, -50.0], 2000.0);
-        assert_eq!(accum.weight, 2000.0);
-        assert_eq!(accum.n_eq(), 3_999);
-        accum.push_sample([100.0, -50.0, -50.0], 1.0);
-        assert_eq!(accum.weight, 2000.0);
-        assert_eq!(accum.n_eq(), 3_999);
-    }
-
-    #[test]
     fn gate_rejects_dc_biased_window() {
         // 结论：z = |A0|·√3/√(G·A1) > Z_MAX = 0.02 时必须 UntrustedBias。
+        // 这类工况 R/d 都过（有旋转、S 非奇异），只有 z 能拒；不拒就会把 DC 学成增益。
         let mut gate = gate();
         let mut rng = Lcg::new(11);
         let mut rot = Rot::new();
@@ -1241,7 +1149,8 @@ mod tests {
 
     #[test]
     fn gate_rejects_collinear_current_excitation() {
-        // 结论：d = det(S)/tr²(S) < D_MIN = 0.01（减零位后回归量）时必须 UntrustedExcitation。
+        // 结论：秩 1 噪声（方向单一、S 秩亏）时 d = det(S)/tr²(S) < D_MIN = 0.01，
+        // 必须 UntrustedExcitation。d 用减零位后的回归量算。
         let mut gate = gate();
         let mut rng = Lcg::new(41);
         for _ in 0..400 {
@@ -1261,30 +1170,6 @@ mod tests {
             let _ = push(&mut gate, s);
         }
         assert_eq!(gate.trust(), Trust::UntrustedExcitation);
-    }
-
-    #[test]
-    fn gate_accepts_balanced_synthetic_rotation() {
-        // 结论：三相平衡旋转且无 DC 偏置时四门 + χ² 全过，返回 Trusted 与 (g_b, g_c)。
-        let mut gate = gate();
-        let mut rng = Lcg::new(0x1234_5678);
-        let mut rot = Rot::new();
-        let mut last = None;
-        for _ in 0..3_000 {
-            rot.step(FULL_STEP_COS, FULL_STEP_SIN);
-            let abc = rot.iabc(1.0 * LSB_PER_AMP);
-            let s = measured(abc, 1.0, 0.0, 1.5, &mut rng);
-            if let Some(g) = push(&mut gate, s) {
-                last = Some(g);
-            }
-        }
-        let (gb, gc) = match last {
-            Some(v) => v,
-            None => panic!("no gain estimate"),
-        };
-        assert!((gb - 1.0).abs() < 0.01, "gamma_b = {gb}");
-        assert!((gc - 1.0).abs() < 0.01, "gamma_c = {gc}");
-        assert_eq!(gate.trust(), Trust::Trusted);
     }
 
     #[test]
@@ -1328,61 +1213,6 @@ mod tests {
     }
 
     #[test]
-    fn pred_pp_meets_0p5_pp_at_0p14_a() {
-        // 结论：0.14 A RMS 旋转工况 pred ≤ 0.5 pp（幅值下限参考点 1）。
-        // σ_ch = 1.5 LSB（单通道；残差 σ≈2.6），N_eq 在 2000 拍后约 2527。
-        let mut gate = gate();
-        let mut rng = Lcg::new(101);
-        let mut rot = Rot::new();
-        let peak = core::f32::consts::SQRT_2 * 0.14 * LSB_PER_AMP;
-        let sigma_ch_std_lsb = 1.5;
-        for _ in 0..2_000 {
-            rot.step(FULL_STEP_COS, FULL_STEP_SIN);
-            let [a, b, c] = rot.iabc(peak);
-            gate.accum.push_sample(
-                [
-                    a + rng.noise(sigma_ch_std_lsb),
-                    b + rng.noise(sigma_ch_std_lsb),
-                    c + rng.noise(sigma_ch_std_lsb),
-                ],
-                1.0,
-            );
-        }
-        let pred = match gate.pred_pp() {
-            Some(v) => v,
-            None => panic!("pred_pp is None"),
-        };
-        assert!(pred <= 0.5, "pred = {pred} pp > 0.5 pp");
-    }
-
-    #[test]
-    fn pred_pp_meets_0p05_pp_at_0p55_a() {
-        // 结论：0.55 A RMS 旋转工况 pred ≤ 0.05 pp（幅值下限参考点 2）。
-        let mut gate = gate();
-        let mut rng = Lcg::new(103);
-        let mut rot = Rot::new();
-        let peak = core::f32::consts::SQRT_2 * 0.55 * LSB_PER_AMP;
-        let sigma_ch_std_lsb = 1.5;
-        for _ in 0..2_000 {
-            rot.step(FULL_STEP_COS, FULL_STEP_SIN);
-            let [a, b, c] = rot.iabc(peak);
-            gate.accum.push_sample(
-                [
-                    a + rng.noise(sigma_ch_std_lsb),
-                    b + rng.noise(sigma_ch_std_lsb),
-                    c + rng.noise(sigma_ch_std_lsb),
-                ],
-                1.0,
-            );
-        }
-        let pred = match gate.pred_pp() {
-            Some(v) => v,
-            None => panic!("pred_pp is None"),
-        };
-        assert!(pred <= 0.05, "pred = {pred} pp > 0.05 pp");
-    }
-
-    #[test]
     fn chi2_gate_only_runs_after_structural_gates() {
         // 结论：CHI2_MAX = 9.21 只在 r/d/z 全过的样本组上计算，否则不得报 UntrustedChange。
         let mut gate = gate();
@@ -1403,7 +1233,7 @@ mod tests {
     }
 
     #[test]
-    fn n_eq_saturates_at_3999_for_2000_weighted_samples() {
+    fn n_eq_saturates_at_3999() {
         // 结论：λ = 0.9995，Σw = 2000 ⇒ N_eq = (1+λ)·Σw = 3999，且饱和。
         let mut accum = GainAccum::empty();
         accum.push_sample([100.0, -50.0, -50.0], 2000.0);

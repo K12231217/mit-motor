@@ -148,7 +148,7 @@ pub const ENC_MAX_MISS: u8 = (MAX_BLIND_US / budget::ISR_PERIOD_US) as u8;
 /// 手算（`jump_limit_lsb` 含 f32，在 const 上下文不可调用）：
 /// `3000 rpm / 60 = 50 rev/s`，`× 16384 count/rev = 819_200 count/s`，
 /// `× 50 µs = 40.96 count/拍` ⇒ 向上取整 41，再加 [`ENC_JUMP_MARGIN_LSB`] = 45。
-/// 测试 `jump_limit_matches_hand_computed_counts` 断言本常量与函数结果相等，
+/// 测试 `jump_limit_matches_policy_mirror` 断言本常量与函数结果相等，
 /// 防止两处漂移。
 pub const B_MAX_LSB: u16 = 45;
 

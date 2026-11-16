@@ -355,24 +355,7 @@ mod tests {
         assert!(Duty::Coast.is_within_limits());
     }
 
-    /// 每条合法迁移一条用例；C6 之后是唯一的非法迁移。
-    #[test]
-    fn calib_step_next_is_the_c0_to_c6_sequence() {
-        use CalibStep::*;
-        let table = [
-            (C0Zero, Some(C1Polarity)),
-            (C1Polarity, Some(C2Direction)),
-            (C2Direction, Some(C3GainAccum)),
-            (C3GainAccum, Some(C4Bias)),
-            (C4Bias, Some(C5Consistency)),
-            (C5Consistency, Some(C6Freeze)),
-            (C6Freeze, None),
-        ];
-        for (from, to) in table {
-            assert_eq!(from.next(), to, "next({from:?})");
-        }
-    }
-
+    /// 从 C0 走到 C6 必须恰好七步、编号连续，且 C6 之后与越界输入都是 None。
     #[test]
     fn calib_step_next_walks_all_seven_steps_once() {
         let mut step = CalibStep::from_u8(0);

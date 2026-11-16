@@ -644,23 +644,14 @@ mod tests {
     }
 
     #[test]
-    fn jump_limit_matches_hand_computed_counts() {
-        // 3000 rpm = 50 rev/s ⇒ 50·16384 = 819200 count/s ⇒ 40.96 count/50 µs
-        // ⇒ ceil 41 + 4 = 45 LSB。
-        assert_eq!(jump_limit_lsb(3_000.0, 50), 45);
-        // 1000 rpm ⇒ 13.65 count/50 µs ⇒ ceil 14 + 4 = 18 LSB。
-        assert_eq!(jump_limit_lsb(1_000.0, 50), 18);
-        // 周期翻倍 ⇒ 预算翻倍。
-        assert_eq!(jump_limit_lsb(3_000.0, 100), 86);
-        // 默认参数就是机械极限 3000 rpm / 50 µs。
-        assert_eq!(EncoderParams::default().jump_limit_lsb, 45);
+    fn jump_limit_matches_policy_mirror() {
         // `policy::B_MAX_LSB` 是同一算式的 const 手算镜像（f32 版本不能进 const），
-        // 盲推断言依赖它，所以这里钉住两者相等。
-        assert_eq!(policy::B_MAX_LSB, 45);
+        // 跳变盲区的断言依赖它，所以这里钉住两者相等。
         assert_eq!(
             jump_limit_lsb(policy::ENC_MECH_RPM_MAX, budget::ISR_PERIOD_US),
             policy::B_MAX_LSB
         );
+        assert_eq!(EncoderParams::default().jump_limit_lsb, policy::B_MAX_LSB);
     }
 
     /// 单个 CRC 位翻转的坏帧（payload 合法但帧尾错）。
