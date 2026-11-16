@@ -3,7 +3,7 @@
 //! Every build / check / size / flash action lives here so CLion, VS Code and
 //! CI execute the same code path. No extra tools (just, make) are required.
 //!
-//! Commands: check build rel fmt fmt-check clippy test size flash rtt arch help
+//! Commands: check build rel fmt fmt-check clippy test doc size flash rtt arch help
 
 mod checks;
 
@@ -30,6 +30,8 @@ fn main() -> ExitCode {
         "clippy" => cargo(&["clippy", "--bins", "--", "-D", "warnings"]),
         // 根 workspace（host crate）的回归测试，不是 firmware。
         "test" => root_cargo(&["test", "--workspace"]),
+        // 文档门禁：根 workspace 全量 rustdoc，任何警告即失败。
+        "doc" => doc_check(),
         "size" => size(),
         // `probe-rs run` comes from firmware/.cargo/config.toml (single source).
         "flash" => cargo(&["run", "--release"]),
@@ -74,6 +76,7 @@ usage: cargo xtask <command> [args]
   fmt-check   cargo fmt --all -- --check      (CI)
   clippy      cargo clippy --bins -- -D warnings   (firmware)
   test        cargo test --workspace         (root workspace, host)
+  doc         cargo doc --no-deps --workspace (RUSTDOCFLAGS=-D warnings)
   size        build --release, then print ELF sections and flash image
               against the FLASH length in firmware/memory.x
   flash       cargo run --release (probe-rs runner from .cargo/config.toml)
@@ -93,6 +96,14 @@ fn cargo(args: &[&str]) -> Result<(), String> {
 /// Runs cargo in the repo root workspace (0_contracts + 3_user), not firmware.
 fn root_cargo(args: &[&str]) -> Result<(), String> {
     run(Command::new("cargo").args(args))
+}
+
+/// `cargo doc` 零警告：rustdoc 警告一律升级为错误。
+fn doc_check() -> Result<(), String> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(["doc", "--no-deps", "--workspace"])
+        .env("RUSTDOCFLAGS", "-D warnings");
+    run(&mut cmd)
 }
 
 fn run(cmd: &mut Command) -> Result<(), String> {

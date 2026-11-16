@@ -1,40 +1,35 @@
-//! CAN FD 线协议（ICD v1）：命令帧 / 反馈帧 / 慢帧的 `repr(C)` 布局。
+//! CAN FD 线协议（ICD v1）：命令帧、反馈帧、慢帧的 `repr(C)` 布局。
 //!
-//! # 通用约定（冻结）
+//! # 通用约定
 //!
-//! - 11-bit 标准帧：ID 低 7 位 = 节点号 `n`（1..=127，0 留给上位机）。
-//!   `CMD = 0x080|n`、`FB = 0x100|n`、`SLOW = 0x180|n`。
-//! - 数据段 2 Mbit/s；`CMD` 定长 16 B，`FB`/`SLOW` 定长 32 B（都是合法 FD DLC）。
-//! - 全部小端（M4 原生顺序）；`rsvd` 必须写 0，接收侧非 0 即整帧丢弃并计 `dropped`
-//!   （用于以后做版本探测，不做静默兼容）。
-//! - 所有物理量是**定点整数 + 明确 LSB**；标识符带单位后缀（PRE-06）。
-//! - 任何"置信度 0–100 %"字段都不存在：置信度由 `d`/`z`/`pred_pp`/`trust` 表达。
-//! - `g_b`/`g_c` 只是两个**相对**增益；共模增益不可观测，帧里不得出现"平均增益"。
+//! - 11-bit 标准帧：ID 低 7 位是节点号 `n`（1..=127，0 留给上位机），
+//!   `CMD = 0x080 | n`、`FB = 0x100 | n`、`SLOW = 0x180 | n`。
+//! - 数据段 2 Mbit/s；`CMD` 定长 16 B，`FB` / `SLOW` 定长 32 B（都是合法 FD DLC）。
+//! - 全部小端（M4 原生顺序）。`rsvd` 必须写 0，接收侧见非 0 即整帧丢弃并计 `dropped`，
+//!   这是版本探测防线，不做静默兼容。
+//! - 物理量是定点整数加明确 LSB；标识符带单位后缀（PRE-06）。
+//! - 没有"置信度 0–100 %"字段：置信度由 `d` / `z` / `pred_pp` / `trust` 表达。
+//! - `g_b` / `g_c` 只是两个相对增益；共模增益不可观测，帧里不得出现"平均增益"。
 //!
-//! # 有损字段（实现时必须显式饱和或断言）
+//! # 有损字段
 //!
-//! `isr_cycles: u16`、`t_us: u32`（FB）、`t_commit_us: u32`（SLOW）相对内部
-//! `u32`/`u64` 是**有损的**：`isr_cycles` 饱和到 `0xFFFF`；两个 32 bit 时间戳
-//! 每 71.58 min 回绕一次，**由主机解绕**，固件侧不做回绕合并。
+//! `isr_cycles: u16`、`t_us: u32`（FB）与 `t_commit_us: u32`（SLOW）相对内部
+//! `u32` / `u64` 有损：`isr_cycles` 饱和到 `0xFFFF`；两个 32 bit 时间戳每 71.58 min
+//! 回绕一次，由主机解绕，固件不做回绕合并。
 //!
-//! 内部 `u64` µs 与线上 `u32` µs **不得直接混用**：打包只许走
-//! [`timestamp_to_wire_us`]，解包只许走 [`timestamp_from_wire_us`]；
-//! 这两个函数的存在就是为了让"截断"在 `grep` 里看得见。
+//! 内部 `u64` µs 与线上 `u32` µs 不得直接混用：打包只走 [`timestamp_to_wire_us`]，
+//! 解包只走 [`timestamp_from_wire_us`]，截断点在源码里一眼可见。
 //!
-//! # 解码契约（PRE-05：不静默继续，也不许在解析路径 panic）
+//! # 解码契约
 //!
-//! 每帧的 `decode` 必须校验：版本号、全部 `rsvd*` 是否为 0、枚举字段是否在合法
-//! 取值内。任一不符返回 [`DecodeError::Rejected`] 并计 `dropped`，**不 panic**。
+//! 每帧的 `decode` 校验版本号、全部 `rsvd*` 与枚举字段取值；任一不符返回
+//! [`DecodeError::Rejected`] 并计 `dropped`，绝不 panic（PRE-05）。
 
 use crate::limits;
 use crate::types::Mode;
 
 /// 布局版本（CMD/SLOW 帧的 `ver` 字段）。
 pub const ICD_VERSION: u8 = 1;
-
-// ---------------------------------------------------------------------------
-// CAN ID
-// ---------------------------------------------------------------------------
 
 /// 板地址下限（0 预留给上位机）。
 pub const NODE_ADDR_MIN: u8 = 1;
@@ -63,9 +58,7 @@ pub const fn slow_id(node_addr: u8) -> u16 {
     CAN_ID_SLOW_BASE | (node_addr as u16)
 }
 
-// ---------------------------------------------------------------------------
-// LSB / 缩放（协议事实，不是可调门限；门限在 limits.rs）
-// ---------------------------------------------------------------------------
+// 缩放是协议事实，不是可调门限；门限见 `limits`。
 
 /// 电流：1 mA/LSB。
 pub const LSB_AMPS: f32 = 0.001;
@@ -92,34 +85,26 @@ pub const LSB_TEMP_C: f32 = 0.1;
 /// Q1.14 的 1.0。
 pub const GAIN_Q14_ONE: u16 = 16_384;
 
-// ---------------------------------------------------------------------------
-// 32 bit 时间戳与内部 u64 的边界（有损转换必须经过这两个函数）
-// ---------------------------------------------------------------------------
-
-/// 32 bit 时间戳的回绕周期（µs）：4 294 967 295 µs ≈ 71.58 min。
+/// 32 bit 时间戳的回绕周期，单位 µs（4 294 967 295 µs ≈ 71.58 min）。
 pub const TIMESTAMP_WRAP_US: u64 = 4_294_967_295;
 
-/// 内部 `u64` µs → 线上 32 bit µs。**有损截断**，只允许在打包帧的那一行调用。
+/// 内部 `u64` µs → 线上 32 bit µs，有损截断，打包帧时只调用这个函数。
 pub const fn timestamp_to_wire_us(t_us: u64) -> u32 {
     t_us as u32
 }
 
-/// 线上 32 bit µs → 内部 `u64`（零扩展）。回绕合并是主机的事，固件不得猜测。
+/// 线上 32 bit µs → 内部 `u64`（零扩展）。回绕合并由主机负责。
 pub const fn timestamp_from_wire_us(t_us: u32) -> u64 {
     t_us as u64
 }
 
-/// 线协议解码失败原因。解析路径**不许 panic**（PRE-05）。
+/// 线协议解码失败原因。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DecodeError {
     /// 版本号不符 / `rsvd*` 非 0 / 枚举越界 / 字段非法：整帧丢弃并计 `dropped`。
     Rejected = 0,
 }
-
-// ---------------------------------------------------------------------------
-// 命令帧 CMD（16 B，主机 → 板）
-// ---------------------------------------------------------------------------
 
 /// 命令标志位：使能。
 pub const CMD_FLAG_ENABLE: u8 = 1 << 0;
@@ -148,8 +133,10 @@ pub const fn effective_ttl_ms(ttl_ms: u16) -> u16 {
     }
 }
 
-/// 命令帧。`mode` 沿用 HR §6 编号：1 待机 / 2 标定 / 3 运行 / 4 台架；
-/// 0（自检）与 5（故障）不可命令。
+/// 命令帧（16 B，主机 → 板）。
+///
+/// `mode` 沿用 HR §6 编号：1 待机 / 2 标定 / 3 运行 / 4 台架；0（自检）与 5（故障）
+/// 不可命令。
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C)]
 pub struct CmdFrame {
@@ -167,7 +154,7 @@ pub struct CmdFrame {
     pub seq: u16,
     /// 台架相选择：0=A / 1=B / 2=C / 0xFF=非台架。
     pub bench_phase: u8,
-    /// 台架注入电流，10 mA/LSB（由主机限幅，不用 i_q_ref 兼职）。
+    /// 台架注入电流，10 mA/LSB（由主机限幅，不用 `i_q_ref` 兼职）。
     pub bench_amps_10ma: i8,
     /// 布局版本，当前 = [`ICD_VERSION`]。
     pub ver: u8,
@@ -175,18 +162,16 @@ pub struct CmdFrame {
     pub rsvd: [u8; 3],
 }
 
-// ---------------------------------------------------------------------------
-// 反馈帧 FB（32 B，板 → 主机，1 kHz）
-// ---------------------------------------------------------------------------
-
-/// 反馈帧。状态字 bit24–31 携带帧序号低 8 位，供 LA 与帧对时。
+/// 反馈帧（32 B，板 → 主机，1 kHz）。
+///
+/// 状态字 bit24–31 携带帧序号低 8 位，供 LA 与帧对时。
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C)]
 pub struct FbFrame {
     /// 32 bit 状态字（`faults::StatusWord`）。
     pub state: u32,
-    /// 样本时间戳（TIM5，1 µs，u32）；71.58 min 回绕一次，**主机解绕**；
-    /// 打包只许走 [`timestamp_to_wire_us`]。
+    /// 样本时间戳（TIM5，1 µs，u32）；71.58 min 回绕一次，由主机解绕。
+    /// 打包只走 [`timestamp_to_wire_us`]。
     pub t_us: u32,
     /// ISR 周期数（DWT，饱和 0xFFFF）。
     pub isr_cycles: u16,
@@ -210,10 +195,6 @@ pub struct FbFrame {
     pub rsvd: u16,
 }
 
-// ---------------------------------------------------------------------------
-// 慢帧 SLOW（32 B，板 → 主机，50 Hz / 状态变化 / 请求时）
-// ---------------------------------------------------------------------------
-
 /// `trust` 位：四维门与 χ² 全过。
 pub const SLOW_TRUST_TRUSTED: u8 = 1 << 0;
 /// `trust` 位：激励充分（R/D 门）。
@@ -230,11 +211,11 @@ pub const SLOW_TRUST_COMMITTED: u8 = 1 << 5;
 /// `trust` 保留掩码：b6..b7 必须为 0（版本探测防线）。
 pub const SLOW_TRUST_RESERVED_MASK: u8 = 0xC0;
 
-/// 慢帧。布局是线协议：自然对齐、无填充，**不是** `packed`——
-/// 解析/打包路径要在 `forbid(unsafe_code)` + `deny(indexing_slicing)` 下逐字段搬运，
-/// packed 会让字段引用变成编译错误而把人逼近死角。
+/// 慢帧（32 B，板 → 主机，50 Hz 或请求时）。
 ///
-/// 版本探测防线：全部 `rsvd*` 必须为 0，`decode` 见非 0 即 [`DecodeError::Rejected`]。
+/// 布局是线协议：自然对齐、无填充，不是 `packed`；`packed` 会让字段引用在
+/// `forbid(unsafe_code)` 与 `deny(indexing_slicing)` 下无法安全访问。全部 `rsvd*`
+/// 必须为 0，`decode` 见非 0 即 [`DecodeError::Rejected`]。
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C)]
 pub struct SlowFrame {
@@ -267,15 +248,12 @@ pub struct SlowFrame {
     /// 保留，必须为 0（占住偏移 22，使 `t_commit_us` 落在自然的 4 字节位置）。
     pub rsvd2: u16,
     /// 提交时刻（TIM5，1 µs，u32）；0 = 未提交。
-    /// 71.58 min 回绕一次，**主机解绕**；打包只许走 [`timestamp_to_wire_us`]。
+    ///
+    /// 71.58 min 回绕一次，由主机解绕；打包只走 [`timestamp_to_wire_us`]。
     pub t_commit_us: u32,
     /// 保留，必须为 0（以后扩字段；非 0 即整帧丢弃）。
     pub rsvd1: [u8; 4],
 }
-
-// ---------------------------------------------------------------------------
-// 解码契约（实现只填函数体，不改签名；解析路径禁止 panic）
-// ---------------------------------------------------------------------------
 
 impl CmdFrame {
     /// 编码成 16 B 小端线格式。与 [`Self::decode`] 严格互逆（`rsvd` 原样写出，
@@ -307,13 +285,18 @@ impl CmdFrame {
         ]
     }
 
-    /// 解码 + 校验：`ver == ICD_VERSION`、`rsvd == [0; 3]`、
-    /// `flags & [`CMD_FLAGS_RESERVED_MASK`] == 0`、
-    /// `mode` 只能取 `Mode::is_commandable()` 为真的值（1..=4；0 自检 / 5 故障不可命令）、
-    /// `bench_phase ∈ {0, 1, 2, 0xFF}`。任一不符 → [`DecodeError::Rejected`]。
+    /// 解码并校验版本、保留字节、保留标志位、模式与台架相选择。
     ///
-    /// 解析路径不做任何假设：所有字段按 `offset_of!` 断言里的偏移逐字节组装，
-    /// 越界/非法值一律拒绝，不 panic、不静默兼容。
+    /// # Errors
+    ///
+    /// 下列任一情况返回 [`DecodeError::Rejected`]：
+    ///
+    /// - `ver != ICD_VERSION`，或 `rsvd != [0; 3]`；
+    /// - `flags` 与 [`CMD_FLAGS_RESERVED_MASK`] 非零；
+    /// - `mode` 不是 `Mode::is_commandable()` 的取值（0、5 及未知编号）；
+    /// - `bench_phase` 不在 `{0, 1, 2, 0xFF}` 内。
+    ///
+    /// 解析路径不做假设：字段按 `offset_of!` 断言的偏移逐字节组装，不 panic。
     pub fn decode(raw: &[u8; 16]) -> Result<Self, DecodeError> {
         let [mode, flags, ttl_lo, ttl_hi, d_lo, d_hi, q_lo, q_hi, seq_lo, seq_hi, bench_phase, bench_amps_10ma, ver, r0, r1, r2] =
             *raw;
@@ -401,9 +384,12 @@ impl FbFrame {
         ]
     }
 
-    /// 解码 + 校验：`rsvd == 0`。其余字段是位模式，无非法值；长度由 `[u8; 32]` 保证。
+    /// 解码并校验保留字节。
     ///
-    /// 不做时间戳回绕合并（那是主机的事），也不校验状态字位域（由
+    /// # Errors
+    ///
+    /// `rsvd != 0` 时返回 [`DecodeError::Rejected`]。其余字段是位模式，无非法值，长度由
+    /// `[u8; 32]` 保证。不做时间戳回绕合并，也不校验状态字位域（由
     /// `faults::StatusWord` 的访问器按需解释）。
     pub fn decode(raw: &[u8; 32]) -> Result<Self, DecodeError> {
         let [s0, s1, s2, s3, t0, t1, t2, t3, isr_lo, isr_hi, vref_lo, vref_hi, ia_lo, ia_hi, ib_lo, ib_hi, ic_lo, ic_hi, id_lo, id_hi, iq_lo, iq_hi, th_lo, th_hi, vel_lo, vel_hi, vb_lo, vb_hi, margin_permille, dropped, r0, r1] =
@@ -490,9 +476,15 @@ impl SlowFrame {
         ]
     }
 
-    /// 解码 + 校验：`ver == ICD_VERSION`、`rsvd0 == 0`、`rsvd1 == [0; 4]`、
-    /// `rsvd2 == 0`、`trust & [`SLOW_TRUST_RESERVED_MASK`] == 0`、`g_ref_phase ≤ 2`。
-    /// 任一不符 → [`DecodeError::Rejected`]（整帧丢弃并计 `dropped`），**不 panic**。
+    /// 解码并校验版本、保留字段、`trust` 保留位与参考相。
+    ///
+    /// # Errors
+    ///
+    /// 下列任一情况返回 [`DecodeError::Rejected`]，整帧丢弃并计 `dropped`：
+    ///
+    /// - `ver != ICD_VERSION`、`rsvd0 != 0`、`rsvd1 != [0; 4]` 或 `rsvd2 != 0`；
+    /// - `trust` 与 [`SLOW_TRUST_RESERVED_MASK`] 非零；
+    /// - `g_ref_phase > 2`。
     pub fn decode(raw: &[u8; 32]) -> Result<Self, DecodeError> {
         let [g_ref_phase, trust, ver, rsvd0, gb_lo, gb_hi, gc_lo, gc_hi, d_lo, d_hi, z_lo, z_hi, pred_lo, pred_hi, chi_lo, chi_hi, n_lo, n_hi, sg_lo, sg_hi, tmp_lo, tmp_hi, r2_lo, r2_hi, t0, t1, t2, t3, r1_0, r1_1, r1_2, r1_3] =
             *raw;
@@ -528,10 +520,7 @@ impl SlowFrame {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 编译期断言：三帧的 size + 每个字段的 offset
-// ---------------------------------------------------------------------------
-
+// 三帧的 size 与逐字段偏移。
 const _: () = assert!(cfg!(target_endian = "little"));
 const _: () = assert!(ICD_VERSION == 1);
 const _: () = assert!(CAN_ID_CMD_BASE | (NODE_ADDR_MAX as u16) == 0x0FF);

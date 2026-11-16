@@ -1,78 +1,74 @@
-//! 相对增益可信闸门（四维结构门 + χ²），以及相对增益正规方程累加器。
+//! 相对增益可信闸门：四维结构门加 χ²，以及正规方程累加器。
 //!
 //! # 为什么需要闸门
 //!
-//! 三路采样链的**共模**增益不可观测：三相同比例放大时 `i_a + i_b + i_c = 0`
-//! 仍然成立，最小二乘残差对它完全盲。相对增益（`g_b/g_a`、`g_c/g_a`）只有
-//! 在电流向量"动起来"、且没有 DC 主导时才能被辨识出来。因此闸门不是
-//! 可选的健康度检查，而是**参数可辨识性的前提**（PRE-05：无静默继续）。
+//! 三路采样链的共模增益不可观测：三相同比例放大时 `i_a + i_b + i_c = 0` 仍成立，
+//! 最小二乘残差对它完全盲。相对增益（`g_b/g_a`、`g_c/g_a`）只有在电流向量动起来、
+//! 且没有 DC 主导时才能被辨识，因此闸门是参数可辨识性的前提，不是可选的健康度检查。
 //!
-//! # 四维门与本模块的对应关系
+//! # 四维门
 //!
-//! | 维度 | 量 | 阈值（limits.rs） | 抓什么 |
+//! | 维度 | 量 | 阈值 | 抓什么 |
 //! |---|---|---|---|
-//! | 方向覆盖 | `R² = |Σi_αβ|² / (n·Σ|i_αβ|²)` | `R_MAX²` | 激励方向单一（常数向量 ⇒ `R²=1`）|
-//! | 信息矩阵 | `d = det(S)/tr²(S)`（减零位后） | `D_MIN` | 无激励 / 回归量秩亏 |
-//! | DC 主导 | `z² = 3·A0²/(G·A1)` | `Z_MAX²` | 整段电流偏一侧，把偏置学成增益 |
-//! | 精度降额 | `pred ≤ KAPPA·target_pp` | `KAPPA` | `pred` 是 RMS 界，p99/pred ≈ 2.3 |
+//! | 方向覆盖 | `R² = |Σi_αβ|² / (n · Σ|i_αβ|²)` | `R_MAX²` | 激励方向单一 |
+//! | 信息矩阵 | `d = det(S) / tr²(S)`（减零位后） | `D_MIN` | 无激励或秩亏 |
+//! | DC 主导 | `z² = 3 · A0² / (G · A1)` | `Z_MAX²` | 把偏置学成增益 |
+//! | 精度降额 | `pred ≤ KAPPA · target_pp` | `KAPPA` | `pred` 是 RMS 界 |
 //!
-//! 一致性门 `CHI2_MAX` 只在通过上面四条之后才算——否则 χ² 的分布假设不成立。
+//! 一致性门 `CHI2_MAX` 只在通过上面四条之后才算，否则 χ² 的分布假设不成立。
 //!
-//! # 预测界（写进实现时的公式，不要改形状）
+//! # 预测界
 //!
 //! ```text
 //! pred(N_eq) = 100 · [ √3·σ̂_e / (s_rms·√N_eq) + (σ̂_e² + δo²) / s_rms² ]   [pp]
 //! N_eq = (1 + λ)·Σw,  λ = 1 - 1/2000,  Σw ≤ 2000 ⇒ N_eq ≤ 3999
 //! ```
 //!
-//! 全部量都在**减零位后的 LSB（码）域**：`σ̂_e`、`s_rms`、`δo` 同量纲，比值
-//! 无量纲，`pred` 直接出 pp。闸门内部不做码 → 安培换算（PRE-06）。
+//! 全部量在减零位后的 LSB（码）域：`σ̂_e`、`s_rms`、`δo` 同量纲，比值无量纲，`pred`
+//! 直接出 pp；闸门内部不做码 → 安培换算（PRE-06）。
 //!
-//! 幅值参考点（是**上限**，不参与计算；σ̂_ch = 1.5 LSB 单通道、N_eq ≈ 3998 实测）：
-//! 0.14 A → 0.19 pp（按 RMS）/ 0.32 pp（按峰值）；0.55 A → 0.028 pp（RMS）/
-//! 0.044 pp（峰值）。冻结记录要求 ≤0.5 pp @ 0.14 A、≤0.05 pp @ 0.55 A，
-//! 两种幅值口径都满足。设备侧固定接受 `pred ≤ KAPPA·TARGET_PP = 0.45 pp`；
-//! 主机可以拿慢帧里的 `pred_pp` 按自己的目标离线重判（例如台架要 0.05 pp 时）。
+//! 幅值参考（上限，不参与计算；`σ̂_ch = 1.5 LSB` 单通道、`N_eq ≈ 3998` 实测）：
+//! 0.14 A → 0.19 pp（RMS）/ 0.32 pp（峰值）；0.55 A → 0.028 pp（RMS）/ 0.044 pp
+//! （峰值），两种口径都满足 ≤ 0.5 pp 与 ≤ 0.05 pp 的要求。设备侧固定接受
+//! `pred ≤ KAPPA · TARGET_PP = 0.45 pp`，主机可以拿慢帧的 `pred_pp` 按自己的目标重判。
 
 use contracts::limits;
 use contracts::types::RawSample3;
 use contracts::Trust;
 
-/// √3（幅值不变 Clarke 变换用）。
+// √3，幅值不变 Clarke 变换用。
 const SQRT3: f32 = 1.732_050_8;
 
-/// 2×2 行列式近零判据。`S` 的元素是码²·权重（量级 1e5 以上），
-/// 小于它的 `det` 已没有数值意义。
+// 2×2 行列式近零判据：`S` 的元素是码²·权重（量级 1e5 以上），更小的 `det` 没有数值意义。
 const DET_EPS: f32 = 1e-12;
 
-/// 12 bit ADC 标称中点（`VREF/2`，HR-203 的 1.65 V）。实际零位由 C0 测量后
-/// 经 [`GainGate::set_zero_lsb`] 覆盖；这里只给 host 测试与冷启动一个确定值。
+// 12 bit ADC 标称中点（`VREF/2`，HR-203 的 1.65 V）。实际零位由 C0 测量后经
+// `GainGate::set_zero_lsb` 覆盖，这里只给 host 测试与冷启动一个确定值。
 const ADC_MIDSCALE_CODE: f32 = 2_048.0;
 
-/// 闸门参数集合。全部取自 [`crate::limits`]，禁止在别处另存副本。
+/// 闸门参数集合，全部取自 [`limits`]，禁止在别处另存副本。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GateParams {
-    /// 方向覆盖门限（FROZEN 0.995）。见模块文档：残差对共模增益盲，必须确认向量在转。
+    /// 方向覆盖门限，见 [`limits::R_MAX`]。
     pub r_max: f32,
-    /// 信息矩阵门限（FROZEN 0.01），作用在**减零位后**的回归量上。
+    /// 信息矩阵门限，作用在减零位后的回归量上，见 [`limits::D_MIN`]。
     pub d_min: f32,
-    /// DC 偏置门限（FROZEN 0.02）：残差对增益盲，`z` 专抓"三相同时偏"的窗口。
+    /// DC 偏置门限，见 [`limits::Z_MAX`]。
     pub z_max: f32,
-    /// 精度门降额（FROZEN 0.9）：`pred` 是 RMS 界，实测 p99/pred ≈ 2.3。
+    /// 精度门降额系数，见 [`limits::KAPPA`]。
     pub kappa: f32,
-    /// 精度目标（FROZEN 0.5 pp）：设备侧接受判据，不是从幅值推出来的。
-    /// 做成字段是为了让测试能改它，验证 `kappa` 降额真的在起作用。
+    /// 精度目标，单位 pp，见 [`limits::TARGET_PP`]；做成字段便于测试验证降额。
     pub target_pp: f32,
-    /// χ²(2) 99 % 分位点（FROZEN 9.21），只在 r/d/z 全过后计算。
+    /// χ²(2) 的 99 % 分位点，见 [`limits::CHI2_MAX`]。
     pub chi2_max: f32,
-    /// 遗忘因子（FROZEN 0.9995）。
+    /// 遗忘因子，见 [`limits::LAMBDA`]。
     pub lambda: f32,
-    /// 组窗样本数 `G`（FROZEN 200 = 10 ms @ 20 kHz）。
+    /// 组窗样本数 `G`，见 [`limits::GROUP_SAMPLES`]。
     pub group_samples: u32,
 }
 
 impl GateParams {
-    /// 冻结参数集。数值只在 `limits.rs` 定义一次（PRE-07）。
+    /// 冻结参数集：数值只在 [`limits`] 定义一次（PRE-07）。
     pub const FROZEN: Self = Self {
         r_max: limits::R_MAX,
         d_min: limits::D_MIN,
@@ -87,38 +83,34 @@ impl GateParams {
 
 /// 相对增益正规方程累加器。
 ///
-/// 未知量固定为 `x = [g_b, g_c]`（参考相 `g_a ≡ 1`）。**共模增益不可观测**，
-/// 因此这里没有"平均增益"字段，线协议里也不允许出现（见 `icd.rs` 的慢帧）。
-///
-/// 模型：`y = φᵀθ`，`φ = [s_b, s_c]`，`y = -s_a`，`θ = [γ_b, γ_c]`。
-/// 所有量都是"减零位后"的回归量，单位是 **ADC LSB（码）**，不是安培。
+/// 未知量固定为 `x = [g_b, g_c]`（参考相 `g_a ≡ 1`）；共模增益不可观测，因此没有
+/// "平均增益"字段，线协议里也不允许出现。模型 `y = φᵀθ`，`φ = [s_b, s_c]`，
+/// `y = -s_a`，`θ = [γ_b, γ_c]`；所有回归量都是减零位后的 ADC LSB（码），不是安培。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GainAccum {
     /// 信息矩阵 `S = Σ w·φφᵀ`，按行主序压成 `[s00, s01, s10, s11]`。
-    /// `d = det(S)/tr²(S)` 从这里算；`D_MIN` 门控就是看它有没有秩亏。
     pub s: [f32; 4],
     /// 正规方程右端 `b = Σ w·φ·y`。
     pub b: [f32; 2],
-    /// `A0 = Σ(s_a + s_b + s_c)`：z 门的分子。对**共模**偏移敏感，对增益不敏感。
+    /// `A0 = Σ(s_a + s_b + s_c)`：z 门的分子，对共模偏移敏感，对增益不敏感。
     pub a0: f32,
-    /// `A1 = Σ(s_a² + s_b² + s_c²)`：z 门的分母（乘组窗 G 后开方）。
+    /// `A1 = Σ(s_a² + s_b² + s_c²)`：z 门的分母（乘组窗样本数后开方）。
     pub a1: f32,
-    /// 组窗内已累加样本数 `G`（每 `group_samples` 清零重算 z）。
+    /// 组窗内已累加样本数，每 `group_samples` 清一次。
     pub groups: u32,
     /// 权重和 `Σw`，被遗忘因子限制在 `WINDOW_SAMPLES`。
     pub weight: f32,
     /// 残差平方和 `Σe²`，供 `σ̂_e`（`pred` 第一项）。
     pub sse: f32,
-    /// `δo²`：零位残余不确定度，供 `pred` 第二项（单位 LSB²）。
+    /// `δo²`：零位残余不确定度，单位 LSB²（`pred` 第二项）。
     pub do2: f32,
-    /// `Σi_α`（Clarke 幅值不变版：`i_α = s_a`）。
+    /// `Σi_α`（Clarke 幅值不变变换，`i_α = s_a`）。
     pub rsum: [f32; 2],
     /// `Σ(i_α² + i_β²)`，方向覆盖门的归一化分母。
     pub ri2: f32,
-    /// 方向覆盖门的样本数（与 `groups` 分开：组窗清空后仍要能算 R）。
+    /// 方向覆盖门的样本数（与 `groups` 分开：组窗清空后仍要能算 `R`）。
     pub rn: u32,
-    /// 当前相对增益估计 `[γ_b, γ_c]`，每组窗末由 [`Self::solve`] 刷新；
-    /// `push_sample` 用它算残差 `e`。初值 `[1, 1]`（未标定）。
+    /// 当前相对增益估计 `[γ_b, γ_c]`，每组窗末由 [`Self::solve`] 刷新，初值 `[1, 1]`。
     pub theta: [f32; 2],
 }
 
@@ -141,16 +133,15 @@ impl GainAccum {
         }
     }
 
-    /// 累加一个样本（已减零位，单位 LSB 码）。`weight` 是本拍样本权重 `w`。
+    /// 累加一个样本（已减零位，单位 LSB 码），`weight` 是本拍权重 `w`。
     ///
-    /// 信息形式（λ 遗忘）：
-    /// `S ← λS + w·φφᵀ`、`b ← λb + w·φ·y`、`weight ← λ·weight + w`（饱和到
-    /// `WINDOW_SAMPLES`）。`a0/a1/ri2/rsum/rn/groups` 是**组窗内不清零**的
-    /// 累加量，由 [`GainGate::step`] 每 `G` 个样本取走并清零。
+    /// 信息形式（λ 遗忘）：`S ← λS + w·φφᵀ`、`b ← λb + w·φ·y`、
+    /// `weight ← λ·weight + w`（饱和到 `WINDOW_SAMPLES`）。`a0` / `a1` / `ri2` /
+    /// `rsum` / `rn` / `groups` 是组窗内不清零的累加量，由 [`GainGate::step`] 每 `G`
+    /// 个样本取走并清零。
     ///
-    /// `sse` 用**当前** θ（每组窗末更新一次）算 `e = y - φᵀθ`，再
-    /// `sse ← λ·sse + e²`。这是近似：θ 在组窗内不更新，实测 `σ̂_e` 偏差
-    /// 约 +2.8 %（良态），不足以影响 0.45 pp 的判据。
+    /// `sse` 用当前 θ（每组窗末更新一次）算 `e = y - φᵀθ`，再 `sse ← λ·sse + e²`。
+    /// θ 在组窗内不更新，实测 `σ̂_e` 偏差约 +2.8 %（良态），不足以影响 0.45 pp 的判据。
     pub fn push_sample(&mut self, s_lsb: [f32; 3], weight: f32) {
         if !weight.is_finite() || weight <= 0.0 {
             return;
@@ -230,7 +221,7 @@ impl GainAccum {
         }
     }
 
-    /// 组窗结束：清掉 z/R 的组内累加量（`groups` 也归零）。
+    // 组窗结束：清掉 z / R 的组内累加量，`groups` 也归零。
     fn clear_group(&mut self) {
         self.a0 = 0.0;
         self.a1 = 0.0;
@@ -240,7 +231,7 @@ impl GainAccum {
         self.groups = 0;
     }
 
-    /// 方向覆盖平方 `R²`；无效时返回 0（随后会被 `D_MIN` 门拦下）。
+    // 方向覆盖平方 `R²`；无效时返回 0，随后会被 `D_MIN` 门拦下。
     fn direction_r2(&self) -> f32 {
         let [r0, r1] = self.rsum;
         let n = self.rn as f32;
@@ -255,7 +246,7 @@ impl GainAccum {
         }
     }
 
-    /// DC 偏置平方 `z² = 3·A0²/(G·A1)`；无激励时返回 0。
+    // DC 偏置平方 `z² = 3·A0² / (G·A1)`；无激励时返回 0。
     fn bias_z2(&self) -> f32 {
         let g = self.groups as f32;
         if g <= 0.0 || self.a1 <= 0.0 || !self.a1.is_finite() {
@@ -269,7 +260,7 @@ impl GainAccum {
         }
     }
 
-    /// 信息矩阵规整度 `d = det(S)/tr²(S)`。
+    // 信息矩阵规整度 `d = det(S) / tr²(S)`。
     fn info_d(&self) -> f32 {
         let [s00, s01, s10, s11] = self.s;
         let det = s00 * s11 - s01 * s10;
@@ -285,11 +276,11 @@ impl GainAccum {
         }
     }
 
-    /// 残差标准差 `σ̂_ch`（**单通道** LSB）。
-    ///
-    /// 残差是三相零和违背，三路独立噪声合成后方差为 `3σ_ch²`；因此
-    /// `σ̂_ch = √(sse / (3·(weight-2)))`。`pred` 的第一项再乘显式 `√3`
-    /// 还原到残差口径，避免把 √3 计两次。
+    // 残差标准差 `σ̂_ch`，单通道 LSB。
+    //
+    // 残差是三相零和违背，三路独立噪声合成后方差为 `3σ_ch²`，因此
+    // `σ̂_ch = √(sse / (3·(weight-2)))`。`pred` 的第一项再乘显式 `√3` 还原到残差口径，
+    // 避免把 √3 计两次。
     fn sigma_ch(&self) -> Option<f32> {
         let dof = self.weight - 2.0;
         let denom = dof * 3.0;
@@ -299,8 +290,8 @@ impl GainAccum {
         Some(sqrt_f32(self.sse / denom))
     }
 
-    /// 残差方差 `σ_res² = sse/(weight-2) = 3σ_ch²`。
-    /// 只给 χ² 用：`θ` 的协方差是 `σ_res²·S⁻¹`，不是单通道方差。
+    // 残差方差 `σ_res² = sse / (weight-2) = 3σ_ch²`。只给 χ² 用：θ 的协方差是
+    // `σ_res²·S⁻¹`，不是单通道方差。
     fn sigma_res2(&self) -> Option<f32> {
         let dof = self.weight - 2.0;
         if dof <= 0.0 || !dof.is_finite() || !self.sse.is_finite() {
@@ -314,11 +305,10 @@ impl GainAccum {
         }
     }
 
-    /// 三相**等权均方根** `s_rms = √(A1/(3G))`（LSB，按相）。
-    ///
-    /// 这是 z 门的分母口径，也是 `pred` 唯一使用的幅值口径：
-    /// 旋转平衡时等于相电流 RMS（幅值/√2），单相激励时为幅值/√3——
-    /// **不要**把它读成"电流幅值/√2"。
+    // 三相等权均方根 `s_rms = √(A1/(3G))`，单位 LSB（按相）。
+    //
+    // 这是 z 门的分母口径，也是 `pred` 唯一使用的幅值口径：旋转平衡时等于相电流 RMS
+    // （幅值/√2），单相激励时为幅值/√3，不是"电流幅值/√2"。
     fn s_rms_lsb(&self) -> Option<f32> {
         let g = self.groups as f32;
         if g <= 0.0 || !self.a1.is_finite() {
@@ -332,7 +322,7 @@ impl GainAccum {
     }
 }
 
-/// 半组窗（χ² 用）：普通求和，不带 λ 遗忘。
+// 半组窗（χ² 用）：普通求和，不带 λ 遗忘。
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct HalfWindow {
     s: [f32; 4],
@@ -383,7 +373,7 @@ impl HalfWindow {
         }
     }
 
-    /// `S⁻¹` 的四个元素（行主序）。协方差 = `S⁻¹·σ̂_e²`。
+    // `S⁻¹` 的四个元素（行主序）；协方差 = `S⁻¹` 乘残差方差。
     fn inv(&self) -> Option<[f32; 4]> {
         let [s00, s01, s10, s11] = self.s;
         let det = s00 * s11 - s01 * s10;
@@ -406,31 +396,27 @@ pub struct GainGate {
     pub params: GateParams,
     /// 正规方程累加器。
     pub accum: GainAccum,
-    /// 最近一次闸门结论（只由本模块写）。
+    // 最近一次闸门结论，只由本模块写。
     trust: Trust,
-    /// 减零位用的**逐相**零位码（LSB）。只有 `zero_valid == true` 时有效；
-    /// 构造后必须由 C0 实测经 [`GainGate::set_zero_lsb`] 写入。
+    // 减零位用的逐相零位码（LSB），只在 `zero_valid` 为真时有效；C0 实测经
+    // `GainGate::set_zero_lsb` 写入。
     zero_lsb: [f32; 3],
-    /// 零位是否已由 C0 实测写入。未置位时 [`GainGate::step`] 直接返回
-    /// `None` 并置 `UntrustedExcitation`（PRE-05：不拿默认零位静默标定）。
+    // 零位是否已由 C0 实测写入。未置位时 `GainGate::step` 返回 `None` 并置
+    // `UntrustedExcitation`，不拿默认零位静默标定（PRE-05）。
     zero_valid: bool,
-    /// 组窗前半（χ² 的 θ1）。
+    // 组窗前半与后半，χ² 的 θ1 / θ2。
     half_a: HalfWindow,
-    /// 组窗后半（χ² 的 θ2）。
     half_b: HalfWindow,
-    /// 上一完整组窗的方向覆盖 `R²`（R 门用它，组窗中途不重算）。
+    // 上一完整组窗的 `R²`、`z²` 与 `d`。
     group_r2: f32,
-    /// 上一完整组窗的 `z²`。
     group_z2: f32,
-    /// 上一完整组窗结束时的 `d`。
     group_d: f32,
-    /// 是否已有完整组窗。
+    // 是否已有完整组窗。
     have_group: bool,
-    /// 上一完整组窗的精度门结论。
+    // 上一完整组窗的精度门结论。
     pred_ok: bool,
-    /// 最近一次 χ² 统计量。
+    // 最近一次 χ² 统计量，以及是否真的算过（四维全过才置位）。
     chi2: f32,
-    /// χ² 是否真的算过（四维全过才置位）。
     chi2_ok: bool,
 }
 
@@ -460,22 +446,23 @@ impl GainGate {
         self.trust
     }
 
-    /// 设置减零位用的**逐相**零位码（C0 测量结果，LSB），并置零位有效位。
+    /// 设置减零位用的逐相零位码（C0 测量结果，LSB），并置零位有效位。
+    ///
     /// 未调用本函数前 [`Self::step`] 不会累加任何样本。
     pub fn set_zero_lsb(&mut self, zero_lsb: [f32; 3]) {
         self.zero_lsb = zero_lsb;
         self.zero_valid = true;
     }
 
-    /// 推进一拍。`valid` 来自 ADC 窗口判据（三路对齐 + 窗口余量）。
+    /// 推进一拍。`valid` 来自 ADC 窗口判据（三路对齐加窗口余量）。
     ///
-    /// 前置：`set_zero_lsb` 已写入逐相零位。未写入时本函数直接返回 `None`
-    /// 并置 `UntrustedExcitation`——绝不拿 2048 中点冒充实测零位（PRE-05）。
+    /// 前置：`set_zero_lsb` 已写入逐相零位。未写入时返回 `None` 并置
+    /// `UntrustedExcitation`，绝不拿 2048 中点冒充实测零位（PRE-05）。
     ///
-    /// `valid == false` 时**冻结**：不累加、不遗忘、不改 `trust`，直接返回
-    /// `None`（用上一份冻结增益）。有效样本先累加；到组窗末端再按
-    /// `R² → d → z² → pred → χ²` 顺序判定并锁存结论。返回 `Some((g_b, g_c))`
-    /// 仅当本拍锁存为 `Trusted` 且 `N_eq ≥ WINDOW_SAMPLES`。
+    /// `valid == false` 时冻结：不累加、不遗忘、不改 `trust`，返回 `None`（用上一份
+    /// 冻结增益）。有效样本先累加，到组窗末端按 `R² → d → z² → pred → χ²` 顺序判定
+    /// 并锁存结论。只有锁存为 `Trusted` 且 `N_eq ≥ WINDOW_SAMPLES` 时才返回
+    /// `Some((g_b, g_c))`。
     pub fn step(&mut self, raw: RawSample3, valid: bool) -> Option<(f32, f32)> {
         if !self.zero_valid {
             self.trust = Trust::UntrustedExcitation;
@@ -566,16 +553,16 @@ impl GainGate {
         }
     }
 
-    /// 当前预测精度界（pp）。`N_eq` 不足或 `s_rms` 为 0 时 `None`。
+    /// 当前预测精度界，单位 pp；`N_eq` 不足或 `s_rms` 为 0 时返回 `None`。
     ///
-    /// `pred = 100·[√3·σ̂_ch/(s_rms·√N_eq) + (σ̂_ch²+δo²)/s_rms²]`。
+    /// `pred = 100 · [√3·σ̂_ch / (s_rms·√N_eq) + (σ̂_ch² + δo²) / s_rms²]`。
     ///
-    /// - `σ̂_ch = √(sse / (3(weight-2)))`：**单通道**噪声，来自三相零和残差
-    ///   （残差方差 = 3σ_ch²，故除以 3 再开方）。第一项的显式 `√3` 把
-    ///   单通道 σ 还原成残差口径，只乘一次。
-    /// - `s_rms = √(a1/(3G))`：**三相等权均方根**，不是"电流幅值/√2"。
-    ///   平衡旋转时它等于相 RMS（幅值/√2）；单相激励时等于幅值/√3。
-    /// - `δo²` 是零位残余不确定度，LSB²。
+    /// - `σ̂_ch = √(sse / (3(weight-2)))`：单通道噪声，来自三相零和残差（残差方差是
+    ///   `3σ_ch²`，故除以 3 再开方）。第一项的显式 `√3` 把单通道 σ 还原成残差口径，
+    ///   只乘一次。
+    /// - `s_rms = √(a1/(3G))`：三相等权均方根，不是"电流幅值/√2"；平衡旋转时等于相
+    ///   RMS（幅值/√2），单相激励时等于幅值/√3。
+    /// - `δo²` 是零位残余不确定度，单位 LSB²。
     pub fn pred_pp(&self) -> Option<f32> {
         let n_eq = self.accum.n_eq();
         if n_eq == 0 {
@@ -594,8 +581,9 @@ impl GainGate {
         }
     }
 
-    /// 清空（换模式/显式重启标定）。零位也必须重新测（置无效），
-    /// 防止旧零位跨工况继续使用。
+    /// 清空（换模式或显式重启标定）。
+    ///
+    /// 零位也置无效，必须重新测，防止旧零位跨工况继续使用。
     pub fn reset(&mut self) {
         self.accum.reset();
         self.trust = Trust::UntrustedExcitation;
@@ -612,10 +600,9 @@ impl GainGate {
         self.chi2_ok = false;
     }
 
-    /// χ²：前后两半组窗的 θ 差与各自协方差。
-    ///
-    /// `(θ1-θ2)ᵀ (Σ1+Σ2)⁻¹ (θ1-θ2)`，`Σi = Si⁻¹·σ_res²`，
-    /// `σ_res² = sse/(weight-2) = 3σ_ch²`（θ 的协方差用残差方差，不是单通道）。
+    // χ²：前后两半组窗的 θ 差与各自协方差，
+    // `(θ1-θ2)ᵀ (Σ1+Σ2)⁻¹ (θ1-θ2)`，`Σi = Si⁻¹·σ_res²`。
+    // `σ_res² = sse/(weight-2) = 3σ_ch²`，θ 的协方差用残差方差，不是单通道方差。
     fn consistency_chi2(&self) -> Option<f32> {
         let sigma2 = self.accum.sigma_res2()?;
         if sigma2 <= 0.0 || !sigma2.is_finite() {
@@ -651,10 +638,10 @@ impl GainGate {
     }
 }
 
-/// 确定性平方根：牛顿迭代 4 次，初值用指数折半位模式。
-///
-/// 无 libm、无表、无分支依赖；`f32` 的位模式在 host 与 target 上一致，
-/// 因此 host 测试与 G474 上得到逐位相同结果。`x ≤ 0`（含 NaN）返回 0。
+// 确定性平方根：牛顿迭代 4 次，初值用指数折半位模式。
+//
+// 无 libm、无表、无分支依赖；`f32` 位模式在 host 与 target 一致，因此 host 测试与
+// G474 上得到逐位相同结果。`x ≤ 0`（含 `NaN`）返回 0。
 fn sqrt_f32(x: f32) -> f32 {
     if x <= 0.0 || x.is_nan() {
         return 0.0;
@@ -672,17 +659,11 @@ fn sqrt_f32(x: f32) -> f32 {
     z
 }
 
-// ---------------------------------------------------------------------------
-// 编译期断言
-// ---------------------------------------------------------------------------
-
-// `size_of::<Trust>() == 1` 的断言随 `Trust` 一起搬到了 `contracts::trust`。
+// `Trust` 的单字节断言在 `contracts::trust`。
 const _: () = assert!(limits::N_EQ_MAX == 3_999);
 const _: () = assert!(limits::GROUP_SAMPLES == 200);
 
-// ---------------------------------------------------------------------------
-// host 测试支撑：固定种子 LCG + 三相旋转发生器（不引入 rand）
-// ---------------------------------------------------------------------------
+// host 测试支撑：固定种子 LCG 与三相旋转发生器，不引入 rand。
 
 #[cfg(test)]
 pub(crate) mod test_support {
@@ -1084,11 +1065,6 @@ mod tests {
         assert_eq!(accum.weight, 2000.0);
         assert_eq!(accum.n_eq(), 3_999);
     }
-
-    // -----------------------------------------------------------------------
-    // 以下 10 条原在 `contracts/src/lib.rs` 的契约测试里；估计器搬到本层后
-    // 跟着一起搬（它们断言的是算法行为，不是线协议事实）。
-    // -----------------------------------------------------------------------
 
     #[test]
     fn gate_rejects_dc_biased_window() {

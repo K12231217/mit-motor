@@ -1,35 +1,28 @@
-//! # `contracts` —— 全工程接口事实表的唯一来源
+//! 全工程接口事实表的唯一来源。
 //!
-//! 这个 crate 的存在理由只有三条：
+//! 物理量与定点约定（[`types`]）、限值与容量（[`limits`]）、线上帧布局与状态字
+//! （[`icd`]、[`faults`]）、跨优先级通道（[`snapshot`]、[`events`]）都只在这里定义一次，
+//! 其它 crate 只许引用（PRE-07）。
 //!
-//! 1. **零依赖、host 可编译**：`#![no_std]` + `#![forbid(unsafe_code)]` + 零堆，
-//!    在 x86 上就能 `cargo check` / 单元测试，不需要 G474 实板（当前阶段无板）。
-//! 2. **接口事实只写一次**：物理量、定点约定、seqlock 快照、事件队列、状态字位域、
-//!    CAN FD 帧布局、门限与容量都在这里定义；`1_bsp` / `2_system` / `3_user` / `4_app`
-//!    只许引用，不许复制（PRE-07、PRE-10）。
-//! 3. **改契约必须编译失败**：每个线上结构都有 `size_of` + 每个字段的 `offset_of!`
-//!    编译期断言；改一个字段就会在这里炸，而不是在台架上表现为"数据看起来不对"。
+//! 零依赖、`no_std`、无堆、无不安全代码，host 上可直接 `cargo test`。每个线上结构都有
+//! `size_of` 与逐字段 `offset_of!` 编译期断言：改字段会在这里编译失败，而不是在台架上
+//! 表现为"数据看起来不对"。
 //!
-//! # 本 crate 的纪律
+//! # 通道
 //!
-//! - PRE-01 无堆：没有 `alloc`，没有 `Vec`/`Box`/`String`。
-//! - PRE-03 不安全代码：禁止；seqlock 用 `AtomicU32` 存位模式实现，全程安全代码。
-//! - PRE-04 跨优先级通道：只有 [`snapshot`] 的 seqlock 与 [`events`] 的有界队列。
-//! - PRE-05 无静默继续：禁止 `unwrap/expect` 与数组下标（clippy deny）。
-//! - PRE-06 量纲进标识符：`_amps` / `_v` / `_us` / `_ma` / `_q14` / `_permille`。
-//! - PRE-07 数值唯一来源：[`limits`]。
-//!
-//! # 文档与实现
-//!
-//! 布局、编码/解码、seqlock 协议都在本 crate 内实现；每个线上结构都有 `size_of`
-//! 与每字段 `offset_of!` 的编译期断言。`#[cfg(test)]` 里的用例是这些数值结论与
-//! 拒绝规则的可执行版本——测试名就是结论。
+//! 跨优先级只有 [`snapshot`] 的 seqlock 与 [`events`] 的有界队列（PRE-04），都是单写者。
 
 #![no_std]
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 #![deny(clippy::indexing_slicing)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![warn(
+    clippy::doc_markdown,
+    clippy::too_long_first_doc_paragraph,
+    clippy::doc_lazy_continuation
+)]
 
 pub mod events;
 pub mod faults;
@@ -51,8 +44,7 @@ extern crate std;
 
 #[cfg(test)]
 mod tests {
-    //! 契约事实的可执行版本。字段级的往返/拒绝用例在 `types`/`icd`/`snapshot`
-    //! 各自的测试模块里（那里能访问私有状态），本模块只覆盖跨模块的接口结论。
+    //! 跨模块契约的可执行版本；字段级用例在各模块自己的测试模块里。
 
     use super::*;
     use crate::faults;

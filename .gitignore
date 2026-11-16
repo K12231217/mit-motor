@@ -3,6 +3,9 @@
 # the shared debug profiles JSON. Everything else (workspace.xml, iml, caches)
 # stays local.
 .idea/*
+# 临时探针与脚本产物一律不进仓库；唯一例外是 STATE 文件 handoff.md。
+.scratch/*
+!.scratch/handoff.md
 !.idea/runConfigurations/
 !.idea/debug-profiles.json
 

@@ -1,14 +1,11 @@
 //! 故障码与 32 bit 状态字。
 //!
-//! # 唯一真源
-//!
-//! 位定义**必须**与 `docs/hardware-requirements.md` §6 一致（PRE-10）。
-//! 改位定义 = 改线协议 = 必须同步上位机与 LA 对时脚本。
+//! 位定义与 `docs/hardware-requirements.md` §6 一致（PRE-10），是线协议的一部分。
 //!
 //! | 位 | 含义 |
 //! |---|---|
 //! | 0–3 | 模式：0 自检 / 1 待机 / 2 标定 / 3 运行 / 4 台架 / 5 故障 |
-//! | 4–6 | 标定状态：Idle / Collecting / Converged / Frozen / LatchedFault |
+//! | 4–6 | 标定状态：Idle / Collecting / Converged / Frozen / `LatchedFault` |
 //! | 7 | 采样有效（窗口内且三路对齐） |
 //! | 8 | 采样窗口判据通过 |
 //! | 9 | 激励充分 |
@@ -17,7 +14,7 @@
 //! | 16–23 | 故障码 |
 //! | 24–31 | 帧序号低 8 位（LA 与帧对时用） |
 //!
-//! LED 只能看粗状态，判据一律以状态字为准。
+//! LED 只反映粗状态，判据一律以状态字为准。
 
 use crate::types::Mode;
 
@@ -49,7 +46,7 @@ pub enum FaultCode {
     CalibLatched = 9,
     /// 10 通信看门狗超时（> `limits::CAN_TIMEOUT_MS`）。
     CommTimeout = 10,
-    /// 11 HardFault / panic 入口（故障现场保留路径）。
+    /// 11 `HardFault` / panic 入口（故障现场保留路径）。
     HardFault = 11,
 }
 
@@ -79,8 +76,10 @@ impl FaultCode {
     }
 }
 
-/// 标定状态（状态字 bit4–6）。与 `CalibStep`（C0–C6）正交：
-/// `CalibStep` 说"在做哪一步"，`CalibState` 说"这批样本结论如何"。
+/// 标定状态（状态字 bit4–6）。
+///
+/// 与 `CalibStep`（C0–C6）正交：`CalibStep` 说"在做哪一步"，`CalibState` 说"这批样本
+/// 结论如何"。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CalibState {
@@ -109,10 +108,6 @@ impl CalibState {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// 位定义（改这里 = 改线协议）
-// ---------------------------------------------------------------------------
 
 /// 模式字段起始位。
 pub const MODE_SHIFT: u32 = 0;
@@ -236,10 +231,7 @@ const fn bit_set(raw: u32, bit: u32) -> bool {
     raw & (1 << bit) != 0
 }
 
-// ---------------------------------------------------------------------------
-// 编译期断言：字段不重叠、位置与 HR §6 一致
-// ---------------------------------------------------------------------------
-
+// 字段不重叠，位置与 HR §6 一致。
 const _: () = assert!(core::mem::size_of::<StatusWord>() == 4);
 const _: () = assert!(core::mem::size_of::<FaultCode>() == 1);
 const _: () = assert!(core::mem::size_of::<CalibState>() == 1);

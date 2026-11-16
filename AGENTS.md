@@ -43,13 +43,14 @@ cargo xtask clippy      # clippy -D warnings
 cargo xtask rel         # release 构建（验收构型）
 cargo xtask size        # .text/.rodata/.data/.bss + 镜像 vs memory.x
 cargo xtask arch        # 架构不变量 I1/I2/I3（纯 Rust：xtask/src/checks.rs，不经 bash）
+cargo xtask doc         # cargo doc --no-deps + RUSTDOCFLAGS=-D warnings（注释规范见 docs/comment-style.md）
 ```
 
 **未落地 —— 禁止在任何文档里当作"已有"引用**：`tools/replay`、`board.yaml`、`self_test`、
 `doc_check.py`、任何 HIL 结果；`1_bsp`/`2_system`/`4_app` 三个 crate 未建，`arch` 只实现 I1/I2/I3，
 I4–I6 无检查实现。新建它们属于 Thread 的一部分，落地后才进本节。
 
-**Worker 交付封顶线（Level 2.5）**：上述七条全绿 + 回执附命令原文输出 + 触及文件清单。
+**Worker 交付封顶线（Level 2.5）**：上述八条全绿 + 回执附命令原文输出 + 触及文件清单。
 涉及**电机出力 / CAN-485 时序 / 保护动作 / 标定参数生效**的改动 → Thread 置 `PENDING_HIL`，由人在台架签收（Level 4）。
 
 ## 3. 读写边界（Router / Worker）

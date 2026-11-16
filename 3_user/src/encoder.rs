@@ -1,9 +1,9 @@
-//! MT6701 24 bit 帧解析 + 接受判据机 + 去抖。
+//! MT6701 24 bit 帧解析、接受判据机与去抖。
 //!
 //! # 分层
 //!
-//! `1_bsp` 只负责 SPI 搬运三个字节（10.625 MHz，MSB 先出）。帧布局、CRC-6、
-//! 状态位语义和"这一帧能不能用"全是纯函数 / 纯状态机，放在这里，host 可测。
+//! `1_bsp` 只负责 SPI 搬运三个字节（10.625 MHz，MSB 先出）。帧布局、CRC-6、状态位
+//! 语义与"这一帧能不能用"都是纯函数或纯状态机，放在这里，host 可测。
 //!
 //! # 帧
 //!
@@ -13,55 +13,54 @@
 //! ```
 //!
 //! - `D`：14 bit 绝对角，16384 计数 = 2π（[`limits::ENC_COUNTS_PER_REV`]）。
-//! - `Mg[1:0]`：0 正常 / 1 磁场过强 / 2 磁场过弱 / 3 保留；`Mg[2]` 按压/气隙突变；
-//!   `Mg[3]` 超速/失锁。不同手册版本对 `Mg[3]` 的命名不一致，这里**只当"角度无效"**，
+//! - `Mg[1:0]`：0 正常 / 1 磁场过强 / 2 磁场过弱 / 3 保留；`Mg[2]` 按压或气隙突变；
+//!   `Mg[3]` 超速或失锁。不同手册版本对 `Mg[3]` 的命名不一致，这里只当"角度无效"，
 //!   不按名字区分原因。
-//! - CRC-6：`x^6 + x + 1`，初值 0，覆盖前 18 bit（D+Mg），MSB 先出。等价于
-//!   `(payload << 6) mod poly` 的余数，[`crc6`] 用 24 bit 长除法实现。
+//! - CRC-6：`x^6 + x + 1`，初值 0，覆盖前 18 bit（D 加 Mg），MSB 先出；等价于
+//!   `(payload << 6) mod poly` 的余数，`crc6` 用 24 bit 长除法实现。
 //!
-//! # 接受判据（四道硬判据 + 一道软告警）
+//! # 接受判据
 //!
 //! 1. CRC 残差为 0，否则 [`Fault::Crc`]；
 //! 2. `Mg[3] == 0`，否则 [`Fault::MagLock`]；
-//! 3. 全 0 帧护栏：`0x000000` 是合法帧（θ=0、Mg=0、CRC=0），与 MISO 恒低不可区分。
+//! 3. 全 0 帧护栏：`0x000000` 是合法帧（θ=0、Mg=0、CRC=0），与 MISO 恒低不可区分；
 //!    连续 [`limits::ENC_ZERO_FRAME_LIMIT`] 帧全 0 且此前接受角非 0 时判
-//!    [`Fault::ZeroFrame`]——靠近回绕处前几帧全 0 还能通过跳变判据，正是这个护栏抓它们；
-//! 4. 相邻**接受**帧的角度差 `|Δθ| ≤ (missed + 1)·B`，`B` 由 [`jump_limit_lsb`] 按
-//!    `ceil(ω_max·T_s / (2π/16384)) + 4` 算出，否则 [`Fault::Jump`]。
+//!    [`Fault::ZeroFrame`]。靠近回绕处的前几帧全 0 还能通过跳变判据，正是它抓这些帧；
+//! 4. 相邻接受帧的角度差 `|Δθ| ≤ (missed + 1) · B`，`B` 由 [`jump_limit_lsb`] 按
+//!    `ceil(ω_max · T_s / (2π/16384)) + 4` 算出，否则 [`Fault::Jump`]。
 //!
-//! 软告警：`Mg[1:0] != 0`（磁场过强/过弱）不拒帧，输出 [`Health::MagWarn`] 由上层
-//! 降额；连续 [`limits::ENC_MAG_WARN_LIMIT`] 帧不消失升级为 [`Fault::MagStuck`]。
+//! 软告警：`Mg[1:0] != 0` 不拒帧，输出 [`Health::MagWarn`] 由上层降额；连续
+//! [`limits::ENC_MAG_WARN_LIMIT`] 帧不消失升级为 [`Fault::MagStuck`]。
 //!
 //! # 去抖与丢失窗口
 //!
-//! CRC 错只说明这一帧丢了，不说明传感器坏：它只计入 `missed`，不增加语义故障的
-//! 连续数。语义故障（`Mg[3]`、全 0 护栏、跳变、磁场异常升级）连续
-//! [`limits::ENC_FAIL_LATCH_FRAMES`] 帧锁存。任何未接受帧都计入 `missed`，连续
-//! 超过 [`limits::ENC_MAX_MISS`] 帧直接锁存。
+//! CRC 错只说明这一帧丢了，不说明传感器坏：它只计入 `missed`，不增加语义故障的连续
+//! 数。语义故障（`Mg[3]`、全 0 护栏、跳变、磁场异常升级）连续
+//! [`limits::ENC_FAIL_LATCH_FRAMES`] 帧锁存。任何未接受帧都计入 `missed`，连续超过
+//! [`limits::ENC_MAX_MISS`] 帧直接锁存。
 //!
-//! 跳变界随丢失拍数线性放宽：`allow = (missed + 1)·B`。这不是放宽判据——`B`
-//! 本来就是"一个周期的最大位移"，丢了几拍就该按几拍算；否则一次 CRC 抖动后的
-//! 恢复帧会被误判成跳变并停机（20 kHz 下这类抖动不是偶发）。超过 `MAX_MISS`
-//! 拍就锁存：此时角度不是"稍微多走了一点"，而是**完全不知道**。
+//! 跳变界随丢失拍数线性放宽为 `(missed + 1) · B`：`B` 本来就是一个周期的最大位移，
+//! 丢了几拍就该按几拍算，否则一次 CRC 抖动后的恢复帧会被误判成跳变（20 kHz 下这类
+//! 抖动不是偶发）。超过 `MAX_MISS` 拍就锁存：此时角度不是"稍微多走了一点"，而是完全
+//! 不知道。
 //!
-//! 锁存后角度冻结在最后一次接受的样本，只有 [`EncoderMonitor::reset`] 能清除——
-//! 安全侧不做自动恢复。
+//! 锁存后角度冻结在最后一次接受的样本，只有 [`EncoderMonitor::reset`] 能清除。
 
 use contracts::limits;
 
-/// 一圈的计数（u32 形态，便于移位/取模）。
+// 一圈的计数（u32 形态，便于移位与取模）。
 const COUNTS_PER_REV: u32 = limits::ENC_COUNTS_PER_REV as u32;
 
-/// 半圈计数：有符号 14 bit 差值的回绕中点。
+// 半圈计数：有符号 14 bit 差值的回绕中点。
 const HALF_TURN: i32 = COUNTS_PER_REV as i32 / 2;
 
-/// 一圈掩码：`diff & TURN_MASK` 得到 0..16383。
+// 一圈掩码：`diff & TURN_MASK` 得到 0..16383。
 const TURN_MASK: i32 = COUNTS_PER_REV as i32 - 1;
 
-/// CRC 域的掩码（6 bit）。
+// CRC 域的掩码（6 bit）。
 const CRC_MASK: u32 = (1 << limits::ENC_CRC_BITS) - 1;
 
-/// 每计数对应的弧度：`2π / 16384`。除法除数是 2 的幂，结果精确。
+// 每计数对应的弧度：`2π / 16384`；除数是 2 的幂，结果精确。
 const RAD_PER_COUNT: f32 = core::f32::consts::TAU / COUNTS_PER_REV as f32;
 
 /// 一帧 MT6701 的解码结果（CRC 已通过，尚未做语义判据）。
@@ -154,7 +153,7 @@ pub fn angle_rad(angle_raw: u16) -> f32 {
 /// 单周期允许的最大角度变化 `B`（LSB）：
 /// `ceil(ω_max · T_s / (2π/16384)) + ENC_JUMP_MARGIN_LSB`。
 ///
-/// 用**关节机械极限**而不是 MT6701 的 55 000 rpm 传感器上限：传感器能转多快
+/// 用关节机械极限而不是 MT6701 的 55 000 rpm 传感器上限：传感器能转多快
 /// 不重要，机械结构允许多快才决定"一拍内真实角度最多走多少计数"。
 pub fn jump_limit_lsb(omega_max_rpm: f32, period_us: u32) -> u16 {
     let counts_per_second = omega_max_rpm / 60.0 * f32::from(limits::ENC_COUNTS_PER_REV);
@@ -203,7 +202,7 @@ impl EncoderParams {
 }
 
 impl Default for EncoderParams {
-    /// `ω_max = ENC_MECH_RPM_MAX`（[OPEN] 3000 rpm）、`T_s = ISR_PERIOD_US`（50 µs）。
+    /// `ω_max = ENC_MECH_RPM_MAX`（3000 rpm）、`T_s = ISR_PERIOD_US`（50 µs）。
     fn default() -> Self {
         Self::new(limits::ENC_MECH_RPM_MAX, limits::ISR_PERIOD_US)
     }
@@ -336,14 +335,14 @@ impl EncoderMonitor {
         self.latched = None;
     }
 
-    /// 接受一帧：更新基准角并清空丢失 / 语义故障连续计数。
+    // 接受一帧：更新基准角并清空丢失与语义故障连续计数。
     fn accept(&mut self, frame: Frame) {
         self.last_angle_raw = Some(frame.angle_raw);
         self.fail_run = 0;
         self.missed = 0;
     }
 
-    /// 记一次传输层丢失（CRC 错）：只增加丢失拍数，不增加语义故障连续数。
+    // 记一次传输层丢失（CRC 错）：只增加丢失拍数，不增加语义故障连续数。
     fn miss(&mut self, fault: Fault) -> AngleOutcome {
         self.missed = self.missed.saturating_add(1);
         if self.missed > self.params.max_miss {
@@ -355,10 +354,9 @@ impl EncoderMonitor {
         }
     }
 
-    /// 记一次语义硬失败：丢失拍数与语义故障连续数同时增加。
-    ///
-    /// 连续 [`EncoderParams::latch_frames`] 帧，或丢失拍数超过
-    /// [`EncoderParams::max_miss`] 拍，即锁存。
+    // 记一次语义硬失败：丢失拍数与语义故障连续数同时增加。
+    //
+    // 连续 `latch_frames` 帧，或丢失拍数超过 `max_miss` 拍，即锁存。
     fn reject(&mut self, fault: Fault) -> AngleOutcome {
         self.missed = self.missed.saturating_add(1);
         self.fail_run = self.fail_run.saturating_add(1);
@@ -371,7 +369,7 @@ impl EncoderMonitor {
         }
     }
 
-    /// 锁存：此后 [`Self::update`] 恒定返回 [`Health::Latched`]，直到 [`Self::reset`]。
+    // 锁存：此后 `update` 恒定返回 `Health::Latched`，直到 `reset`。
     fn latch(&mut self, fault: Fault) -> AngleOutcome {
         self.latched = Some(fault);
         AngleOutcome {
@@ -380,7 +378,7 @@ impl EncoderMonitor {
         }
     }
 
-    /// 硬失败期间保持最后一次接受的角度。
+    // 硬失败期间保持最后一次接受的角度。
     fn hold_theta_rad(&self) -> f32 {
         match self.last_angle_raw {
             Some(angle_raw) => angle_rad(angle_raw),
@@ -389,15 +387,15 @@ impl EncoderMonitor {
     }
 }
 
-/// 有符号 14 bit 角度差：`16383 → 0` 是 `+1` 而不是 `-16383`。
+// 有符号 14 bit 角度差：`16383 → 0` 是 `+1` 而不是 `-16383`。
 fn wrap_delta(new: u16, old: u16) -> i32 {
     let diff = i32::from(new) - i32::from(old);
     ((diff + HALF_TURN) & TURN_MASK) - HALF_TURN
 }
 
-/// CRC-6：`x^6 + x + 1`，初值 0，`payload` 为前 18 bit（D+Mg）。
-///
-/// 24 bit 长除法：把 `payload << 6` 逐位除以 `0x43`，余数即 CRC。
+// CRC-6：`x^6 + x + 1`，初值 0，`payload` 为前 18 bit（D 与 Mg）。
+//
+// 24 bit 长除法：把 `payload << 6` 逐位除以 `0x43`，余数即 CRC。
 const fn crc6(payload: u32) -> u8 {
     const POLY: u32 = limits::ENC_CRC_POLY as u32;
     const SHIFT: u32 = limits::ENC_CRC_BITS as u32;
@@ -413,7 +411,11 @@ const fn crc6(payload: u32) -> u8 {
     (reg & CRC_MASK) as u8
 }
 
-/// 三个字节（MSB 先出）→ [`Frame`]。只校验 CRC，语义判据由 [`EncoderMonitor`] 做。
+/// 三个字节（MSB 先出）→ [`Frame`]，只校验 CRC。
+///
+/// # Errors
+///
+/// CRC-6 残差非 0 时返回 [`FrameError::Crc`]；语义判据由 [`EncoderMonitor`] 负责。
 pub fn parse(raw: [u8; 3]) -> Result<Frame, FrameError> {
     let [hi, mid, lo] = raw;
     let word = (u32::from(hi) << 16) | (u32::from(mid) << 8) | u32::from(lo);
@@ -428,10 +430,7 @@ pub fn parse(raw: [u8; 3]) -> Result<Frame, FrameError> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// 编译期断言
-// ---------------------------------------------------------------------------
-
+// 常数与 `limits` 的一致性。
 const _: () = assert!(COUNTS_PER_REV == 1 << limits::ENC_ANGLE_BITS);
 const _: () = assert!(HALF_TURN * 2 == COUNTS_PER_REV as i32);
 

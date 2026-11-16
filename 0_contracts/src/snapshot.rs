@@ -2,52 +2,30 @@
 //!
 //! # 协议
 //!
-//! `seq` 为奇数表示"正在写"。写者唯一（快环 `current_loop` @8 写 `Fast`，
-//! 慢环 `calib`/`can` @2–5 写 `Cmd`/`Gain`），读者可以任意多。
-//! 全程用 `AtomicU32` 存 f32 的位模式（`to_bits/from_bits`），因此本 crate 可以
-//! 保持 `#![forbid(unsafe_code)]`；编译后就是普通 `LDR`/`STR`，零额外代价。
+//! `seq` 为奇数表示正在写。单写者：`current_loop` @8 写 [`FastSnapshot`]，
+//! `calib` / `can` @2–5 写 [`CmdSnapshot`] / [`GainSnapshot`]，读者可任意多。
+//! 全程用 `AtomicU32` 存 f32 的位模式（`to_bits` / `from_bits`），保持
+//! `forbid(unsafe_code)`，编译后就是普通 `LDR` / `STR`。M4 单核、无 D-cache、快照不与
+//! DMA 共享，因此 `Acquire` / `Release` 足以约束编译器与总线顺序。
 //!
-//! # 为什么不用 `UnsafeCell` + `ptr::write`
+//! 发布序列：`seq` 加 1 变奇（`Release`），逐 word 存 payload（`Relaxed`），`seq` 再
+//! 加 1 变偶（`Release`）。上行方向必须拆成 [`CmdSnapshot`] 与 [`GainSnapshot`]，
+//! 同一个快照由两个任务写会破坏单写者前提。
 //!
-//! 那要求不安全代码（裸指针），直接破掉 I2 不变量（PRE-03）。M4 单核、无 D-cache、
-//! 快照不与 DMA 共享 ⇒ 只需 `Acquire/Release` 约束编译器与总线顺序，无需额外 DMB。
-//!
-//! # 写者约定（三个快照共用）
-//!
-//! 单写者（PRE-04）。发布序列固定为：
-//!
-//! 1. `seq` 加 1 → **奇数**（`Release`）：宣告"正在写"。
-//! 2. 逐 word 存 payload（`Relaxed`）：word 之间没有跨 word 的语义，
-//!    读者只接受"两次 `seq` 相同"的整套 word。
-//! 3. `seq` 加 1 → **偶数**（`Release`）：宣告"这一拍可读"。
-//!
-//! 上行方向**必须拆成两个快照**：[`CmdView`] 只由 `can` 写，[`GainView`] 只由
-//! `calib` 写。绝不允许把两组字段塞进同一个快照由两个任务写——那会破坏单写者
-//! 前提，`seq` 的奇偶不再代表一个一致的状态。
-//!
-//! # 两个读者 API（按读者优先级选，不是按心情选）
-//!
-//! - `read_once`：给**高优先级读者**（prio 8 电流环）。M4 单核下它运行时，
-//!   低优先级写者全程冻结，`seq` 不可能在本次读期间变化 ⇒ 一次判定就够：
-//!   `s0` 为奇数（写者被冻在"正在写"）就返回 `None`，由调用方用上一拍。
-//!   也就是说**在这个方向上重试是死代码**——多转几圈只浪费 50 µs 预算。
-//! - `read_retry`：给**低优先级读者**。写者是 prio 8，会在读期间抢占读者 ⇒
-//!   `s0` 与 `s1` 可能不同，必须从 `s0` 重试到 `s1 == s0`；最多
-//!   [`crate::limits::SNAPSHOT_RETRY_MAX`]（= 4）次，仍不收敛返回 `None`，
-//!   调用方用上一拍值。绝不阻塞、绝不自旋等待。
-//!
-//! 方向对照：
+//! # 读法
 //!
 //! | 快照 | 写者 | 读者 | 允许的读法 |
 //! |---|---|---|---|
-//! | [`FastSnapshot`] | prio 8 电流环 | prio 1–5 慢任务 | `read_retry`（可被抢占）；`read_once` 只用于"丢一拍也行"的日志 |
-//! | [`CmdSnapshot`] | prio 2–5（`can`/`calib` 互斥） | prio 8 电流环 | 只允许 `read_once`；`read_retry` 在该方向不可能成功 |
-//! | [`GainSnapshot`] | prio 2 `calib` | prio 5 `can`/遥测 | `read_retry` |
+//! | [`FastSnapshot`] | prio 8 | prio 1–5 | `read_retry`；`read_once` 仅用于丢一拍也行的日志 |
+//! | [`CmdSnapshot`] | prio 2–5 | prio 8 | 只允许 `read_once` |
+//! | [`GainSnapshot`] | prio 2 | prio 5 | `read_retry` |
 //!
-//! # 代价
+//! 高优先级读者运行时低优先级写者被冻结，`seq` 不可能在两次 load 之间变化，一次判定
+//! 就够；低优先级读者会被写者抢占，只能从 `s0` 重试到 `s1 == s0`，上限
+//! [`crate::limits::SNAPSHOT_RETRY_MAX`] 次，仍不收敛就用上一拍值，绝不阻塞。
 //!
-//! 最坏 4 ×（读 seq + 16 word 拷贝 + 读 seq）≈ 80 cycles ≈ 0.47 µs @170 MHz，
-//! 已计入 I6 的 25 µs 预算。
+//! 最坏 4 ×（读 `seq` + 16 word 拷贝 + 读 `seq`）≈ 80 cycles ≈ 0.47 µs @170 MHz，
+//! 已计入 25 µs 的 ISR 预算。
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -60,10 +38,10 @@ pub const CMD_WORDS: usize = 6;
 /// `GainView` 的 word 数（32 B / 4）。
 pub const GAIN_WORDS: usize = 8;
 
-/// 下行快照视图：电流环 → 慢环。64 B，无填充。
+/// 下行快照视图：电流环 → 慢环，64 B 无填充。
 ///
-/// 字段顺序与 `docs/software-architecture.md` §3.1 的表一致；
-/// `duty_norm` 是**已夹紧后的实际值**（不是指令值），便于事后区分算法错与饱和。
+/// 字段顺序与 `docs/software-architecture.md` §3.1 的表一致。`duty_norm` 是已夹紧后的
+/// 实际值（不是指令值），便于事后区分算法错与饱和。
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C)]
 pub struct FastView {
@@ -92,9 +70,10 @@ pub struct FastView {
 }
 
 impl FastView {
-    /// 编码成 16 个 word。word 顺序 = `offset_of!` 断言里的字节偏移 / 4；
-    /// `f32` 一律走 `to_bits`（安全代码，不借用 `transmute`/裸指针，也不做任何舍入）。
-    /// `margin_permille`/`dropped` 两个 u16 共用一个 word（低/高半字）。
+    /// 编码成 16 个 word，顺序 = 字节偏移 / 4。
+    ///
+    /// `f32` 一律走 `to_bits`（不借用 `transmute` 或裸指针，也不做舍入）；
+    /// `margin_permille` 与 `dropped` 两个 u16 共用一个 word（低/高半字）。
     pub fn encode(&self) -> [u32; FAST_WORDS] {
         let [ia, ib, ic] = self.i_abc_amps;
         let [id, iq] = self.i_dq_amps;
@@ -119,8 +98,8 @@ impl FastView {
         ]
     }
 
-    /// 从 16 个 word 还原。与 [`Self::encode`] 严格互逆（`f32` 位级复原，
-    /// 包括 `-0.0` 与 NaN 的 payload）。
+    /// 从 16 个 word 还原，与 [`Self::encode`] 严格互逆（`f32` 位级复原，含 `-0.0`
+    /// 与 `NaN` 的 payload）。
     pub fn decode(words: &[u32; FAST_WORDS]) -> Self {
         let [t_lo, t_hi, ia, ib, ic, id, iq, da, db, dc, theta, vbus, isr_cycles, state, margin_dropped, seq_hint] =
             *words;
@@ -140,10 +119,10 @@ impl FastView {
     }
 }
 
-/// 上行快照视图：慢环 → 电流环。24 B（6 word）。
+/// 上行快照视图：慢环 → 电流环，24 B（6 word）。
 ///
-/// 电流环只认 `mode`/`seq`/`ttl_ms` 与 dq 目标；`flags` 用于"停止/清故障后重新使能"
-/// 这类一次性动作，必须在 `ttl_ms` 内生效，否则电流环丢帧并计数。
+/// 电流环只认 `mode` / `seq` / `ttl_ms` 与 dq 目标。`flags` 用于"停止或清故障后重新
+/// 使能"这类一次性动作，必须在 `ttl_ms` 内生效，否则电流环丢帧并计数。
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C)]
 pub struct CmdView {
@@ -199,10 +178,10 @@ impl CmdView {
     }
 }
 
-/// 增益快照视图：标定任务 → CAN/遥测。32 B（8 word）。
+/// 增益快照视图：标定任务 → CAN / 遥测，32 B（8 word）。
 ///
-/// `trust`/`step` 存枚举编号；`t_us` 是 **u32**（71.6 min 回绕），相对内部 u64
-/// 是**有损的**：转换处必须显式截断并保证快照存活时间远小于回绕周期。
+/// `trust` / `step` 存枚举编号。`t_us` 是 `u32`（71.6 min 回绕），相对内部 `u64`
+/// 有损：转换处必须显式截断，并保证快照存活时间远小于回绕周期。
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C)]
 pub struct GainView {
@@ -255,13 +234,11 @@ impl GainView {
     }
 }
 
-/// 有界读核心（三个快照共用一份实现）。
-///
-/// 返回 `(结果, 实际尝试次数)`：次数只为测试证明"重试有界"而返回，生产路径直接丢弃。
-/// `max_attempts` 取 1（`read_once`）或 [`limits::SNAPSHOT_RETRY_MAX`]（`read_retry`）。
-///
-/// 一致性判据是 `s0 == s1` 且 `s0` 偶：`s0` 奇表示读开始于写者中途，直接放弃本次
-/// 尝试；两次 `Acquire` 读相同表示 payload 的 `Relaxed` 读全部落在同一拍内。
+// 有界读核心，三个快照共用。
+//
+// 一致性判据是 `s0 == s1` 且 `s0` 偶：`s0` 奇表示读开始于写者中途，直接放弃本次尝试；
+// 两次 `Acquire` 读相同表示 payload 的 `Relaxed` 读全部落在同一拍内。返回尝试次数只为
+// 测试证明"重试有界"，生产路径丢弃。
 fn read_words<const N: usize>(
     seq: &AtomicU32,
     w: &[AtomicU32; N],
@@ -302,8 +279,8 @@ impl FastSnapshot {
         }
     }
 
-    /// 单写者发布。`seq` 先置奇（`Release`）、写 payload（逐 word `Relaxed`）、
-    /// 再置偶（`Release`）。调用者必须确认自己是唯一写者（PRE-04）。
+    /// 单写者发布：`seq` 置奇（`Release`）、写 payload（逐 word `Relaxed`）、再置偶
+    /// （`Release`）。调用者必须确认自己是唯一写者（PRE-04）。
     pub fn write(&self, v: &FastView) {
         // 单写者 ⇒ 进入时 `seq` 必为偶，+1 即奇、+2 即偶，无需 CAS。
         let seq = self.seq.load(Ordering::Relaxed);
@@ -314,20 +291,20 @@ impl FastSnapshot {
         self.seq.store(seq.wrapping_add(2), Ordering::Release);
     }
 
-    /// 一次尝试。失败（写者正在写）返回 `None`，调用方用上一拍值。
+    /// 一次尝试；写者正在写时返回 `None`，调用方用上一拍值。
     ///
-    /// **只适用于不会被 prio 8 写者抢占的读者**；本快照的读者是 prio 1–5，
-    /// 会被写者抢占，所以正常路径应该用 [`Self::read_retry`]。
+    /// 只适用于不会被 prio 8 写者抢占的读者。本快照的读者是 prio 1–5，会被抢占，
+    /// 正常路径应使用 [`Self::read_retry`]。
     pub fn read_once(&self) -> Option<FastView> {
         read_words(&self.seq, &self.w, 1)
             .0
             .map(|words| FastView::decode(&words))
     }
 
-    /// 有界重试（≤ [`limits::SNAPSHOT_RETRY_MAX`] 次）。绝不阻塞。
+    /// 有界重试（≤ [`limits::SNAPSHOT_RETRY_MAX`] 次），绝不阻塞。
     ///
-    /// 写者是 prio 8，会在读者执行期间抢占并完成发布；重试到 `s1 == s0` 即可。
-    /// 用完次数仍不收敛就返回 `None`，调用方用上一拍值。
+    /// 写者是 prio 8，会在读者执行期间抢占并完成发布，重试到 `s1 == s0` 即可；用完
+    /// 次数仍不收敛就返回 `None`，调用方用上一拍值。
     pub fn read_retry(&self) -> Option<FastView> {
         read_words(&self.seq, &self.w, limits::SNAPSHOT_RETRY_MAX)
             .0
@@ -361,21 +338,19 @@ impl CmdSnapshot {
         self.seq.store(seq.wrapping_add(2), Ordering::Release);
     }
 
-    /// 一次尝试。**这是电流环唯一允许的读法。**
+    /// 一次尝试，这是电流环唯一允许的读法。
     ///
-    /// 读者是 prio 8，运行时写者（prio 2–5）全程冻结 ⇒ `seq` 不可能在两次
-    /// load 之间变化，一次判定就够；`s0` 为奇数说明写者被冻在发布中途，
-    /// 直接返回 `None` 用上一拍。
+    /// 读者是 prio 8，运行时写者（prio 2–5）全程冻结，`seq` 不可能在两次 load 之间
+    /// 变化，一次判定就够；`s0` 为奇数说明写者被冻在发布中途，返回 `None` 用上一拍。
     pub fn read_once(&self) -> Option<CmdView> {
         read_words(&self.seq, &self.w, 1)
             .0
             .map(|words| CmdView::decode(&words))
     }
 
-    /// **本方向的重试是死代码**：若读开始于 `seq` 奇数，写者（prio 2–5）被
-    /// prio 8 读者冻结，`seq` 保持奇数，重试任意次都得到 `None`；若读开始于
-    /// 偶数，`read_once` 已经成功。所以这里保留的 4 次尝试只用于与下行 API
-    /// 形状一致，**不允许在电流环里调用**。
+    /// 本方向的重试是死代码：读开始于奇数时写者被冻结、`seq` 保持奇数，重试任意次都
+    /// 得到 `None`；读开始于偶数时 `read_once` 已经成功。保留它是为了三个快照的 API
+    /// 形状一致，不允许在电流环里调用。
     pub fn read_retry(&self) -> Option<CmdView> {
         read_words(&self.seq, &self.w, limits::SNAPSHOT_RETRY_MAX)
             .0
@@ -409,7 +384,7 @@ impl GainSnapshot {
         self.seq.store(seq.wrapping_add(2), Ordering::Release);
     }
 
-    /// 一次尝试。写者可能在读期间抢占（prio 2 vs prio 5），失败返回 `None`。
+    /// 一次尝试；写者可能在读期间抢占（prio 2 对 prio 5），失败返回 `None`。
     pub fn read_once(&self) -> Option<GainView> {
         read_words(&self.seq, &self.w, 1)
             .0
@@ -425,10 +400,7 @@ impl GainSnapshot {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 编译期断言：三个视图的字节布局 + 三个快照实例大小
-// ---------------------------------------------------------------------------
-
+// 三个视图的字节布局与三个快照实例大小。
 const _: () = assert!(core::mem::size_of::<FastView>() == 64);
 const _: () = assert!(core::mem::offset_of!(FastView, t_us) == 0);
 const _: () = assert!(core::mem::offset_of!(FastView, i_abc_amps) == 8);
@@ -589,8 +561,8 @@ mod tests {
         assert!(attempts <= limits::SNAPSHOT_RETRY_MAX);
     }
 
-    /// 上行方向（prio 2–5 写、prio 8 读）：写者被冻结在中间态时，重试
-    /// **不可能**把结果救回来——`seq` 一直奇数，4 次与 1 次结论相同。
+    /// 上行方向（prio 2–5 写、prio 8 读）：写者被冻结在中间态时，重试不可能把结果
+    /// 救回来，`seq` 一直奇数，4 次与 1 次结论相同。
     #[test]
     fn cmd_snapshot_retry_can_never_succeed_at_prio8() {
         let snap = CmdSnapshot::empty();
@@ -606,10 +578,10 @@ mod tests {
         assert_eq!(snap.seq.load(Ordering::Relaxed), 1, "读者不得改写 seq");
     }
 
-    /// **诚实声明**：host（x86-64、单线程、强序内存模型）造不出真正的内存序撕裂，
-    /// 所以本用例只覆盖 odd/even 协议分支与"发布后完整可读"，**不证明原子性**。
-    /// 真正的无撕裂保证依赖 M4 单核 + Acquire/Release 的论证（见模块文档），
-    /// 台架上用 LA 对时与 seq_hint 才能观测。
+    /// 诚实声明：host（x86-64、单线程、强序内存模型）造不出真正的内存序撕裂，本用例
+    /// 只覆盖 odd/even 协议分支与"发布后完整可读"，不证明原子性。无撕裂保证依赖 M4
+    /// 单核加 `Acquire` / `Release` 的论证（见模块文档），台架上用 LA 对时与
+    /// `seq_hint` 才能观测。
     #[test]
     fn seqlock_does_not_tear_on_host() {
         let snap = FastSnapshot::empty();
