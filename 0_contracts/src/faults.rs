@@ -137,6 +137,11 @@ pub const ENC1_FAULT_BIT: u32 = 12;
 pub const ENC2_OK_BIT: u32 = 13;
 /// E2 异常。
 pub const ENC2_FAULT_BIT: u32 = 14;
+/// 命令拒绝位：最近一条下行命令被状态机拒绝。
+///
+/// 位 15 是编码器字段（11–14）与故障码字段（16–23）之间唯一空闲位。拒绝原因本身走慢帧
+/// 与日志，这里只给主机一个"去看日志"的布尔量。
+pub const CMD_REJECT_BIT: u32 = 15;
 /// 故障码字段起始位。
 pub const FAULT_SHIFT: u32 = 16;
 /// 故障码字段掩码（8 bit）。
@@ -200,6 +205,11 @@ impl StatusWord {
         ((self.0 >> ENCODER_SHIFT) & ENCODER_MASK) as u8
     }
 
+    /// 最近一条命令是否被状态机拒绝（bit15）。
+    pub const fn cmd_rejected(self) -> bool {
+        bit_set(self.0, CMD_REJECT_BIT)
+    }
+
     /// 故障码编号（bit16–23）。
     pub const fn fault_code_bits(self) -> u8 {
         ((self.0 >> FAULT_SHIFT) & FAULT_MASK) as u8
@@ -247,6 +257,7 @@ const _: () = assert!(SAMPLE_VALID_BIT + 1 == WINDOW_OK_BIT);
 const _: () = assert!(WINDOW_OK_BIT + 1 == EXCITATION_OK_BIT);
 const _: () = assert!(EXCITATION_OK_BIT + 1 == CONSISTENT_BIT);
 const _: () = assert!(CONSISTENT_BIT + 1 == ENCODER_SHIFT);
-const _: () = assert!(ENCODER_SHIFT + 4 == 15);
+const _: () = assert!(ENCODER_SHIFT + 4 == CMD_REJECT_BIT);
+const _: () = assert!(CMD_REJECT_BIT + 1 == FAULT_SHIFT);
 const _: () = assert!(FAULT_SHIFT + 8 == SEQ_SHIFT);
 const _: () = assert!(SEQ_SHIFT + 8 == 32);

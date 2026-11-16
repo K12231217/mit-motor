@@ -226,7 +226,7 @@ pub enum CalibStep {
     C4Bias = 4,
     /// C5 一致性加精度降额：χ² 与 `pred ≤ KAPPA · target`。
     C5Consistency = 5,
-    /// C6 冻结：发布 Gain 快照；不写 flash（无标定档案路径）。
+    /// C6 冻结：发布 Gain 快照；档案落盘布局见 `contracts::limits::hw` 的双槽定义。
     C6Freeze = 6,
 }
 
@@ -254,7 +254,7 @@ impl CalibStep {
     ///
     /// 迁移表只有顺序 C0→C1→…→C6→`None`。某一步判据失败时回退到哪里、是否锁存属于
     /// 标定状态机，不在契约层表达。
-    pub fn next(self) -> Option<Self> {
+    pub const fn next(self) -> Option<Self> {
         match self {
             Self::C0Zero => Some(Self::C1Polarity),
             Self::C1Polarity => Some(Self::C2Direction),

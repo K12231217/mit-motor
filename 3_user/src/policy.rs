@@ -175,6 +175,14 @@ pub const ENC_FAIL_LATCH_FRAMES: u8 = 2;
 /// 依据：覆盖量化与两帧之间的采样相位抖动；4 LSB ≈ 0.088° 机械角。
 pub const ENC_JUMP_MARGIN_LSB: u8 = 4;
 
+/// 故障清除前要求的无故障持续时长，单位 `µs`。
+///
+/// 依据：HR 的安全阶梯要求"故障锁存，清除需显式命令 + 无故障持续 T"，未给 T。取
+/// 0.5 s 的两条理由：比通信看门狗（`budget::CAN_TIMEOUT_MS = 20 ms`）长 25 倍，
+/// 通信抖动不会被当成"已经稳定"；又短于人工对命令生效的耐心（超过 1 s 会以为命令
+/// 丢了）。判据在 `user::fsm`，本常量只给时长。
+pub const FAULT_CLEAR_HOLD_US: u32 = 500_000;
+
 /// 零位标定的误差半宽，单位 LSB。
 ///
 /// C0 测量零位后残余误差按 `[-h, +h]` 的均匀分布处理（`h = 0.5` LSB 即"半个码"，
@@ -206,6 +214,10 @@ const _: () = assert!(ENC_ZERO_FRAME_LIMIT > ENC_FAIL_LATCH_FRAMES);
 const _: () = assert!(ENC_MAG_WARN_LIMIT > ENC_FAIL_LATCH_FRAMES);
 const _: () = assert!(ENC_MAX_MISS > 0);
 const _: () = assert!(DO_LSB_HALF_WIDTH > 0.0);
+
+// 清故障窗口必须长于通信看门狗：否则"通信刚恢复"就能被当成"已经稳定"，
+// 20 ms 的丢帧抖动会直接换来一次清故障。
+const _: () = assert!(FAULT_CLEAR_HOLD_US > budget::CAN_TIMEOUT_MS as u32 * 1_000);
 
 // 盲推窗口的两条物理底线（整数算术，避免 f32 在 const 里的不确定舍入）。
 //

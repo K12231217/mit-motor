@@ -59,6 +59,35 @@ pub const ENC_COUNTS_PER_REV: u16 = 1 << ENC_ANGLE_BITS;
 /// `user::policy::ENC_SPI_HZ`。
 pub const ENC_SPI_MAX_HZ: u32 = 1_000_000_000 / 64;
 
+/// Flash bank 2 起始地址，单位 字节。
+///
+/// 双 bank 模式下两个 bank **不连续**：bank 1 是 `0x0800_0000…0x0800_FFFF`，bank 2 起于
+/// `0x0804_0000`，中间 `0x0801_0000…0x0803_FFFF` 是地址空洞。依据：RM0440 Table 7
+/// （512/256/128 KB dual bank organization，单 bank 见 Table 8）与 DS12288 §3.4 的
+/// `Read-while-write` 特性；本文件的镜像见 `firmware/memory.x`。
+pub const FLASH_BANK2_BASE: u32 = 0x0804_0000;
+
+/// Flash bank 2 容量，单位 字节（128 KB 器件每 bank 64 KB）。
+pub const FLASH_BANK2_BYTES: u32 = 64 * 1024;
+
+/// Flash 页大小，单位 字节（G474 全系 2 KB/页）。
+pub const FLASH_PAGE_BYTES: u32 = 2 * 1024;
+
+/// 标定档案单槽占用的页数，单位 页。
+///
+/// 槽内只放一条定长记录（`board_id` + 版本 + 零位 + 相对增益 + 编码器零偏 + `OVP` +
+/// CRC），剩余空间留给同槽的第二份副本，供写中断电时回退。
+pub const CALIB_SLOT_PAGES: u32 = 2;
+
+/// 标定档案单槽容量，单位 字节。
+pub const CALIB_SLOT_BYTES: u32 = CALIB_SLOT_PAGES * FLASH_PAGE_BYTES;
+
+/// 标定档案 A 槽起始地址，单位 字节。
+pub const CALIB_SLOT_A_BASE: u32 = FLASH_BANK2_BASE;
+
+/// 标定档案 B 槽起始地址，单位 字节。
+pub const CALIB_SLOT_B_BASE: u32 = FLASH_BANK2_BASE + CALIB_SLOT_BYTES;
+
 // 编译期自检：这些数不许自相矛盾。
 const _: () = assert!(D_MAX > 0.0);
 const _: () = assert!(D_MAX < 1.0);
@@ -82,3 +111,10 @@ const _: () = assert!(ENC_FRAME_BITS == ENC_ANGLE_BITS + ENC_MAG_BITS + ENC_CRC_
 const _: () = assert!(ENC_COUNTS_PER_REV == 1 << ENC_ANGLE_BITS);
 const _: () = assert!(ENC_CRC_POLY >> ENC_CRC_BITS == 1);
 const _: () = assert!(ENC_SPI_MAX_HZ == 15_625_000);
+
+// bank 2 的页几何：整 bank、槽、页三者互相整除，两个槽都落在 bank 2 内且不重叠。
+const _: () = assert!(FLASH_BANK2_BASE.is_multiple_of(FLASH_PAGE_BYTES));
+const _: () = assert!(FLASH_BANK2_BYTES.is_multiple_of(FLASH_PAGE_BYTES));
+const _: () = assert!(CALIB_SLOT_BYTES.is_multiple_of(FLASH_PAGE_BYTES));
+const _: () = assert!(2 * CALIB_SLOT_BYTES <= FLASH_BANK2_BYTES);
+const _: () = assert!(CALIB_SLOT_B_BASE == CALIB_SLOT_A_BASE + CALIB_SLOT_BYTES);

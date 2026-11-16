@@ -1,8 +1,8 @@
 //! 全工程接口事实表的唯一来源。
 //!
 //! 物理量与定点约定（[`types`]）、限值与容量（[`limits`]）、线上帧布局与状态字
-//! （[`icd`]、[`faults`]）、跨优先级通道（[`snapshot`]、[`events`]）都只在这里定义一次，
-//! 其它 crate 只许引用（PRE-07）。
+//! （[`icd`]、[`faults`]）、状态机类型（[`fsm`]）、跨优先级通道（[`snapshot`]、[`events`]）
+//! 都只在这里定义一次，其它 crate 只许引用（PRE-07）。
 //!
 //! 零依赖、`no_std`、无堆、无不安全代码，host 上可直接 `cargo test`。每个线上结构都有
 //! `size_of` 与逐字段 `offset_of!` 编译期断言：改字段会在这里编译失败，而不是在台架上
@@ -26,6 +26,7 @@
 
 pub mod events;
 pub mod faults;
+pub mod fsm;
 pub mod icd;
 pub mod limits;
 pub mod snapshot;
@@ -34,6 +35,7 @@ pub mod types;
 
 pub use crate::events::{CalibPayload, Cmd, Event};
 pub use crate::faults::{CalibState, FaultCode, StatusWord};
+pub use crate::fsm::{LoopAction, MotorState, Reject, SysEvent};
 pub use crate::icd::{CmdFrame, DecodeError, FbFrame, SlowFrame, ICD_VERSION};
 pub use crate::snapshot::{CmdSnapshot, CmdView, FastSnapshot, FastView, GainSnapshot, GainView};
 pub use crate::trust::Trust;
