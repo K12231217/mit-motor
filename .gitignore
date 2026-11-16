@@ -8,3 +8,6 @@
 
 # xtask is its own workspace, so it has its own build dir.
 /xtask/target/
+
+# 根 workspace（0_contracts + 3_user）的 host 构建目录。
+/target/

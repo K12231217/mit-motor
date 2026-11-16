@@ -247,7 +247,9 @@ const _: () = assert!(size_of::<Event>() <= 32);
 
 任何字段改动都会**编译失败**——这是"给 AI 填空"最有效的一道锁。
 
-## 9. 检查手段（CI，`ci/arch_check.sh`）
+## 9. 检查手段（CI，`cargo xtask arch`）
+
+实现在 `xtask/src/checks.rs`（纯 Rust，无 shell 依赖）。
 
 1. `cargo tree -p user | grep -E "bsp|embassy-stm32|embassy-executor|rtic"` → 必须为空；
 2. `cargo tree -p system | grep -E "stm32|embassy-stm32|embassy-executor|rtic"` → 必须为空；

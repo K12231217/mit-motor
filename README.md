@@ -37,6 +37,8 @@ cargo xtask check        # cargo check
 cargo xtask rel          # release 构建（验收构型）
 cargo xtask size         # 打印 .text/.rodata/.data/.bss + 镜像大小与 memory.x 预算占比
 cargo xtask clippy       # -D warnings
+cargo xtask test         # cargo test --workspace（根 workspace 的 host 单测）
+cargo xtask arch         # 架构不变量 I1/I2/I3（纯 Rust）
 cargo xtask fmt-check    # CI 用
 cargo xtask flash        # probe-rs runner（芯片名在 firmware/.cargo/config.toml）
 cargo xtask rtt          # probe-rs attach，读 defmt/RTT
