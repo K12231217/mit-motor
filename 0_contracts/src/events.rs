@@ -7,7 +7,7 @@
 use crate::faults::FaultCode;
 use crate::types::{DqTarget, Mode};
 
-pub use crate::limits::{CMD_Q, EVT_Q, LOG_Q, TRC_Q};
+pub use crate::limits::budget::{CMD_Q, EVT_Q, LOG_Q, TRC_Q};
 
 /// 标定提交载荷（定长、定点化、可 CRC）。
 ///

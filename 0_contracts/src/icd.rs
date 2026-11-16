@@ -120,7 +120,7 @@ pub const CMD_FLAG_BENCH_INJECT: u8 = 1 << 4;
 /// 命令标志位保留掩码：b5..b7 必须为 0（版本探测防线，非 0 即整帧丢弃）。
 pub const CMD_FLAGS_RESERVED_MASK: u8 = 0xE0;
 
-/// `ttl_ms = 0`：用默认 [`limits::CAN_TIMEOUT_MS`]。
+/// `ttl_ms = 0`：用默认 [`limits::budget::CAN_TIMEOUT_MS`]。
 pub const TTL_MS_DEFAULT: u16 = 0;
 /// `ttl_ms = 0xFFFF`：不超时（只在台架/标定维护时用）。
 pub const TTL_MS_NONE: u16 = 0xFFFF;
@@ -128,7 +128,7 @@ pub const TTL_MS_NONE: u16 = 0xFFFF;
 /// 纯取值：实际生效的 TTL（毫秒）。
 pub const fn effective_ttl_ms(ttl_ms: u16) -> u16 {
     match ttl_ms {
-        TTL_MS_DEFAULT => limits::CAN_TIMEOUT_MS,
+        TTL_MS_DEFAULT => limits::budget::CAN_TIMEOUT_MS,
         other => other,
     }
 }

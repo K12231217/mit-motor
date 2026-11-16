@@ -20,11 +20,12 @@
 //! # 预测界
 //!
 //! ```text
-//! pred(N_eq) = 100 · [ √3·σ̂_e / (s_rms·√N_eq) + (σ̂_e² + δo²) / s_rms² ]   [pp]
+//! pred(N_eq) = 100 · [ √3·σ̂_ch / (s_rms·√N_eq) + (σ̂_ch² + δo²) / s_rms² ]   [pp]
+//! σ̂_ch = 单通道残差标准差（1σ，LSB）；σ_res = √3·σ̂_ch，第一项的 √3 只出现一次
 //! N_eq = (1 + λ)·Σw,  λ = 1 - 1/2000,  Σw ≤ 2000 ⇒ N_eq ≤ 3999
 //! ```
 //!
-//! 全部量在减零位后的 LSB（码）域：`σ̂_e`、`s_rms`、`δo` 同量纲，比值无量纲，`pred`
+//! 全部量在减零位后的 LSB（码）域：`σ̂_ch`、`s_rms`、`δo` 同量纲，比值无量纲，`pred`
 //! 直接出 pp；闸门内部不做码 → 安培换算（PRE-06）。
 //!
 //! 幅值参考（上限，不参与计算；`σ̂_ch = 1.5 LSB` 单通道、`N_eq ≈ 3998` 实测）：
@@ -32,7 +33,7 @@
 //! （峰值），两种口径都满足 ≤ 0.5 pp 与 ≤ 0.05 pp 的要求。设备侧固定接受
 //! `pred ≤ KAPPA · TARGET_PP = 0.45 pp`，主机可以拿慢帧的 `pred_pp` 按自己的目标重判。
 
-use contracts::limits;
+use crate::policy;
 use contracts::types::RawSample3;
 use contracts::Trust;
 
@@ -46,38 +47,38 @@ const DET_EPS: f32 = 1e-12;
 // `GainGate::set_zero_lsb` 覆盖，这里只给 host 测试与冷启动一个确定值。
 const ADC_MIDSCALE_CODE: f32 = 2_048.0;
 
-/// 闸门参数集合，全部取自 [`limits`]，禁止在别处另存副本。
+/// 闸门参数集合，全部取自 [`policy`]，禁止在别处另存副本。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GateParams {
-    /// 方向覆盖门限，见 [`limits::R_MAX`]。
+    /// 方向覆盖门限，见 [`policy::R_MAX`]。
     pub r_max: f32,
-    /// 信息矩阵门限，作用在减零位后的回归量上，见 [`limits::D_MIN`]。
+    /// 信息矩阵门限，作用在减零位后的回归量上，见 [`policy::D_MIN`]。
     pub d_min: f32,
-    /// DC 偏置门限，见 [`limits::Z_MAX`]。
+    /// DC 偏置门限，见 [`policy::Z_MAX`]。
     pub z_max: f32,
-    /// 精度门降额系数，见 [`limits::KAPPA`]。
+    /// 精度门降额系数，见 [`policy::KAPPA`]。
     pub kappa: f32,
-    /// 精度目标，单位 pp，见 [`limits::TARGET_PP`]；做成字段便于测试验证降额。
+    /// 精度目标，单位 pp，见 [`policy::TARGET_PP`]；做成字段便于测试验证降额。
     pub target_pp: f32,
-    /// χ²(2) 的 99 % 分位点，见 [`limits::CHI2_MAX`]。
+    /// χ²(2) 的 99 % 分位点，见 [`policy::CHI2_MAX`]。
     pub chi2_max: f32,
-    /// 遗忘因子，见 [`limits::LAMBDA`]。
+    /// 遗忘因子，见 [`policy::LAMBDA`]。
     pub lambda: f32,
-    /// 组窗样本数 `G`，见 [`limits::GROUP_SAMPLES`]。
+    /// 组窗样本数 `G`，见 [`policy::GROUP_SAMPLES`]。
     pub group_samples: u32,
 }
 
 impl GateParams {
-    /// 冻结参数集：数值只在 [`limits`] 定义一次（PRE-07）。
+    /// 冻结参数集：数值只在 [`policy`] 定义一次（PRE-07）。
     pub const FROZEN: Self = Self {
-        r_max: limits::R_MAX,
-        d_min: limits::D_MIN,
-        z_max: limits::Z_MAX,
-        kappa: limits::KAPPA,
-        target_pp: limits::TARGET_PP,
-        chi2_max: limits::CHI2_MAX,
-        lambda: limits::LAMBDA,
-        group_samples: limits::GROUP_SAMPLES,
+        r_max: policy::R_MAX,
+        d_min: policy::D_MIN,
+        z_max: policy::Z_MAX,
+        kappa: policy::KAPPA,
+        target_pp: policy::TARGET_PP,
+        chi2_max: policy::CHI2_MAX,
+        lambda: policy::LAMBDA,
+        group_samples: policy::GROUP_SAMPLES,
     };
 }
 
@@ -100,9 +101,11 @@ pub struct GainAccum {
     pub groups: u32,
     /// 权重和 `Σw`，被遗忘因子限制在 `WINDOW_SAMPLES`。
     pub weight: f32,
-    /// 残差平方和 `Σe²`，供 `σ̂_e`（`pred` 第一项）。
+    /// 残差平方和 `Σe²`，供 `σ̂_ch_std_lsb`（`pred` 第一项）。
     pub sse: f32,
-    /// `δo²`：零位残余不确定度，单位 LSB²（`pred` 第二项）。
+    /// `δo²`：零位残余不确定度，单位 LSB²（`pred` 第二项）。由
+    /// [`GainGate::set_zero_uncertainty_lsb`] 写入，默认
+    /// `policy::DO2_LSB2 = (2·0.5)²/12 = 1/12`。
     pub do2: f32,
     /// `Σi_α`（Clarke 幅值不变变换，`i_α = s_a`）。
     pub rsum: [f32; 2],
@@ -141,12 +144,12 @@ impl GainAccum {
     /// 个样本取走并清零。
     ///
     /// `sse` 用当前 θ（每组窗末更新一次）算 `e = y - φᵀθ`，再 `sse ← λ·sse + e²`。
-    /// θ 在组窗内不更新，实测 `σ̂_e` 偏差约 +2.8 %（良态），不足以影响 0.45 pp 的判据。
+    /// θ 在组窗内不更新，实测 `σ̂_ch` 偏差约 +2.8 %（良态），不足以影响 0.45 pp 的判据。
     pub fn push_sample(&mut self, s_lsb: [f32; 3], weight: f32) {
         if !weight.is_finite() || weight <= 0.0 {
             return;
         }
-        let lambda = limits::LAMBDA;
+        let lambda = policy::LAMBDA;
         let [sa, sb, sc] = s_lsb;
 
         let [s00, s01, s10, s11] = self.s;
@@ -162,7 +165,7 @@ impl GainAccum {
         self.b = [lambda * b0 + weight * sb * y, lambda * b1 + weight * sc * y];
 
         let next_weight = lambda * self.weight + weight;
-        let weight_cap = limits::WINDOW_SAMPLES as f32;
+        let weight_cap = policy::WINDOW_SAMPLES as f32;
         self.weight = if next_weight >= weight_cap {
             weight_cap
         } else {
@@ -204,8 +207,13 @@ impl GainAccum {
     }
 
     /// 清空累加器（换工况/换模式/提交后）。
+    ///
+    /// `do2` 是零位标定的属性，不是窗内统计量：清窗不能把零位不确定度重置成 0
+    /// （那会让 `pred` 第二项凭空消失），因此这里保留它。
     pub fn reset(&mut self) {
+        let do2 = self.do2;
         *self = Self::empty();
+        self.do2 = do2;
     }
 
     /// 有效样本数 `N_eq = floor((1+λ)Σw)`，饱和到 `N_EQ_MAX = 3999`。
@@ -213,11 +221,11 @@ impl GainAccum {
         if !self.weight.is_finite() || self.weight <= 0.0 {
             return 0;
         }
-        let n = (1.0 + limits::LAMBDA) * self.weight;
+        let n = (1.0 + policy::LAMBDA) * self.weight;
         if !n.is_finite() || n <= 0.0 {
             0
         } else {
-            (n as u32).min(limits::N_EQ_MAX)
+            (n as u32).min(policy::N_EQ_MAX)
         }
     }
 
@@ -276,12 +284,14 @@ impl GainAccum {
         }
     }
 
-    // 残差标准差 `σ̂_ch`，单通道 LSB。
+    // 单通道残差标准差 `σ̂_ch_std_lsb`，1σ、单通道、单位 LSB。
     //
-    // 残差是三相零和违背，三路独立噪声合成后方差为 `3σ_ch²`，因此
-    // `σ̂_ch = √(sse / (3·(weight-2)))`。`pred` 的第一项再乘显式 `√3` 还原到残差口径，
-    // 避免把 √3 计两次。
-    fn sigma_ch(&self) -> Option<f32> {
+    // 推导：残差（三相零和违背）是 `e = -ε_a - γ_b·ε_b - γ_c·ε_c`，三路独立时
+    // `Var(e) = σ²(1 + γ_b² + γ_c²) ≈ 3σ²`（γ ≈ 1）。样本残差平方和是 `sse`，
+    // 自由度 `weight - 2`（两个相对增益），于是单通道方差
+    // `σ² = sse / (3·(weight-2))`、`σ_res = √3·σ_ch`。`pred` 第一项再乘显式 `√3`
+    // 把单通道 σ 还原到残差口径——这个 `√3` 全链只出现一次，不能计两次。
+    fn sigma_ch_std_lsb(&self) -> Option<f32> {
         let dof = self.weight - 2.0;
         let denom = dof * 3.0;
         if dof <= 0.0 || denom <= 0.0 || !denom.is_finite() || !self.sse.is_finite() {
@@ -290,9 +300,9 @@ impl GainAccum {
         Some(sqrt_f32(self.sse / denom))
     }
 
-    // 残差方差 `σ_res² = sse / (weight-2) = 3σ_ch²`。只给 χ² 用：θ 的协方差是
-    // `σ_res²·S⁻¹`，不是单通道方差。
-    fn sigma_res2(&self) -> Option<f32> {
+    // 残差方差 `σ_res² = sse / (weight-2) = 3σ_ch²`，单位 LSB²。只给 χ² 用：θ 的
+    // 协方差是 `σ_res²·S⁻¹`，不是单通道方差。
+    fn sigma_res2_lsb2(&self) -> Option<f32> {
         let dof = self.weight - 2.0;
         if dof <= 0.0 || !dof.is_finite() || !self.sse.is_finite() {
             return None;
@@ -401,6 +411,9 @@ pub struct GainGate {
     // 减零位用的逐相零位码（LSB），只在 `zero_valid` 为真时有效；C0 实测经
     // `GainGate::set_zero_lsb` 写入。
     zero_lsb: [f32; 3],
+    // 零位标定的误差半宽 `h`，单位 LSB；`do2 = (2h)²/12`。单独存是因为
+    // `GainAccum::reset` 清的是窗内统计量，零位不确定度必须跨窗保留。
+    do_lsb_half_width: f32,
     // 零位是否已由 C0 实测写入。未置位时 `GainGate::step` 返回 `None` 并置
     // `UntrustedExcitation`，不拿默认零位静默标定（PRE-05）。
     zero_valid: bool,
@@ -422,12 +435,19 @@ pub struct GainGate {
 
 impl GainGate {
     /// 纯构造：参数冻结、累加器清零、结论置为"激励不足"（还没证据）。
+    ///
+    /// 零位不确定度取 [`policy::DO_LSB_HALF_WIDTH`]（0.5 LSB ⇒ `δo² = 1/12`），
+    /// 不是 0：零位标定永远有残余误差，`pred` 第二项必须把它算进去。
     pub const fn new(params: GateParams) -> Self {
         Self {
             params,
-            accum: GainAccum::empty(),
+            accum: GainAccum {
+                do2: do2_from_half_width(policy::DO_LSB_HALF_WIDTH),
+                ..GainAccum::empty()
+            },
             trust: Trust::UntrustedExcitation,
             zero_lsb: [ADC_MIDSCALE_CODE; 3],
+            do_lsb_half_width: policy::DO_LSB_HALF_WIDTH,
             zero_valid: false,
             half_a: HalfWindow::empty(),
             half_b: HalfWindow::empty(),
@@ -452,6 +472,27 @@ impl GainGate {
     pub fn set_zero_lsb(&mut self, zero_lsb: [f32; 3]) {
         self.zero_lsb = zero_lsb;
         self.zero_valid = true;
+    }
+
+    /// 设置零位标定的误差半宽 `h`（单位 LSB），刷新
+    /// `δo² = (2h)²/12`（均匀分布假设：误差落在 `[-h, +h]`）。
+    ///
+    /// 默认取 [`policy::DO_LSB_HALF_WIDTH`]（0.5 LSB ⇒ 1/12 LSB²），由
+    /// [`Self::new`] 写入；`h = 0` 只用于对照实验（"零位无误差"的乐观界）。
+    /// 非有限或负的输入按 0 处理，不允许 `NaN` 把 `pred` 变成 `None`。
+    pub fn set_zero_uncertainty_lsb(&mut self, half_width_lsb: f32) {
+        let h = if half_width_lsb.is_finite() && half_width_lsb > 0.0 {
+            half_width_lsb
+        } else {
+            0.0
+        };
+        self.do_lsb_half_width = h;
+        self.accum.do2 = do2_from_half_width(h);
+    }
+
+    /// 当前零位误差半宽，单位 LSB。
+    pub const fn zero_uncertainty_lsb(&self) -> f32 {
+        self.do_lsb_half_width
     }
 
     /// 推进一拍。`valid` 来自 ADC 窗口判据（三路对齐加窗口余量）。
@@ -546,7 +587,7 @@ impl GainGate {
             Trust::Trusted
         };
 
-        if self.trust.is_trusted() && self.accum.n_eq() >= limits::WINDOW_SAMPLES {
+        if self.trust.is_trusted() && self.accum.n_eq() >= policy::WINDOW_SAMPLES {
             self.accum.solve()
         } else {
             None
@@ -557,22 +598,24 @@ impl GainGate {
     ///
     /// `pred = 100 · [√3·σ̂_ch / (s_rms·√N_eq) + (σ̂_ch² + δo²) / s_rms²]`。
     ///
-    /// - `σ̂_ch = √(sse / (3(weight-2)))`：单通道噪声，来自三相零和残差（残差方差是
-    ///   `3σ_ch²`，故除以 3 再开方）。第一项的显式 `√3` 把单通道 σ 还原成残差口径，
-    ///   只乘一次。
+    /// - `σ̂_ch = √(sse / (3(weight-2)))`：单通道噪声（1σ、单通道、单位 LSB），来自
+    ///   三相零和残差。残差 `e = -ε_a - γ_b ε_b - γ_c ε_c` ⇒
+    ///   `Var(e) = σ²(1 + γ_b² + γ_c²) ≈ 3σ²` ⇒ `σ_res = √3·σ_ch`；第一项的显式
+    ///   `√3` 就是把单通道 σ 还原到残差口径，全链只乘这一次。
     /// - `s_rms = √(a1/(3G))`：三相等权均方根，不是"电流幅值/√2"；平衡旋转时等于相
     ///   RMS（幅值/√2），单相激励时等于幅值/√3。
-    /// - `δo²` 是零位残余不确定度，单位 LSB²。
+    /// - `δo²` 是零位残余不确定度，单位 LSB²，见
+    ///   [`Self::set_zero_uncertainty_lsb`]。
     pub fn pred_pp(&self) -> Option<f32> {
         let n_eq = self.accum.n_eq();
         if n_eq == 0 {
             return None;
         }
-        let sigma_ch = self.accum.sigma_ch()?;
+        let sigma_ch_std_lsb = self.accum.sigma_ch_std_lsb()?;
         let s_rms = self.accum.s_rms_lsb()?;
         let n = n_eq as f32;
-        let term1 = SQRT3 * sigma_ch / (s_rms * sqrt_f32(n));
-        let term2 = (sigma_ch * sigma_ch + self.accum.do2) / (s_rms * s_rms);
+        let term1 = SQRT3 * sigma_ch_std_lsb / (s_rms * sqrt_f32(n));
+        let term2 = (sigma_ch_std_lsb * sigma_ch_std_lsb + self.accum.do2) / (s_rms * s_rms);
         let pred = 100.0 * (term1 + term2);
         if pred.is_finite() {
             Some(pred)
@@ -585,7 +628,9 @@ impl GainGate {
     ///
     /// 零位也置无效，必须重新测，防止旧零位跨工况继续使用。
     pub fn reset(&mut self) {
+        let half_width = self.do_lsb_half_width;
         self.accum.reset();
+        self.set_zero_uncertainty_lsb(half_width);
         self.trust = Trust::UntrustedExcitation;
         self.zero_lsb = [ADC_MIDSCALE_CODE; 3];
         self.zero_valid = false;
@@ -604,7 +649,7 @@ impl GainGate {
     // `(θ1-θ2)ᵀ (Σ1+Σ2)⁻¹ (θ1-θ2)`，`Σi = Si⁻¹·σ_res²`。
     // `σ_res² = sse/(weight-2) = 3σ_ch²`，θ 的协方差用残差方差，不是单通道方差。
     fn consistency_chi2(&self) -> Option<f32> {
-        let sigma2 = self.accum.sigma_res2()?;
+        let sigma2 = self.accum.sigma_res2_lsb2()?;
         if sigma2 <= 0.0 || !sigma2.is_finite() {
             return None;
         }
@@ -638,6 +683,12 @@ impl GainGate {
     }
 }
 
+// 零位误差按 `[-h, +h]` 均匀分布时的方差：`(2h)²/12`。`h = 0.5 LSB` ⇒ `1/12 LSB²`。
+const fn do2_from_half_width(half_width_lsb: f32) -> f32 {
+    let full_width = 2.0 * half_width_lsb;
+    full_width * full_width / 12.0
+}
+
 // 确定性平方根：牛顿迭代 4 次，初值用指数折半位模式。
 //
 // 无 libm、无表、无分支依赖；`f32` 位模式在 host 与 target 一致，因此 host 测试与
@@ -660,8 +711,8 @@ fn sqrt_f32(x: f32) -> f32 {
 }
 
 // `Trust` 的单字节断言在 `contracts::trust`。
-const _: () = assert!(limits::N_EQ_MAX == 3_999);
-const _: () = assert!(limits::GROUP_SAMPLES == 200);
+const _: () = assert!(policy::N_EQ_MAX == 3_999);
+const _: () = assert!(policy::GROUP_SAMPLES == 200);
 
 // host 测试支撑：固定种子 LCG 与三相旋转发生器，不引入 rand。
 
@@ -797,14 +848,121 @@ mod tests {
         gate, measured, push, raw, Lcg, Rot, ARC_STEP_COS, ARC_STEP_SIN, FULL_STEP_COS,
         FULL_STEP_SIN,
     };
-    use super::{sqrt_f32, GainAccum, GainGate, GateParams};
-    use contracts::{limits, Trust};
+    use super::{sqrt_f32, GainAccum, GainGate, GateParams, HalfWindow};
+    use crate::policy;
+    use contracts::Trust;
 
     /// 1 A 相峰值对应的 LSB 码（2.97 mA/LSB，HR-203）：只用于构造测试数据。
     const LSB_PER_AMP: f32 = 1.0 / 0.002_97;
 
     fn frozen_gate() -> GainGate {
         gate()
+    }
+
+    // 合成状态的解析目标：`s_rms = 12.5 LSB`、`σ_ch = 0.6756 LSB`、`N_eq = 3999`。
+    // 反解依据是 pred 公式：
+    //   pred(δo²) = 100·[√3·σ_ch/(s_rms·√N_eq) + (σ_ch² + δo²)/s_rms²]
+    //   pred(0)      ≈ 0.440 pp ≤ KAPPA·TARGET_PP = 0.45 pp
+    //   pred(1/12)   ≈ 0.493 pp > 0.45 pp
+    // 0.6756 由 pred(0) = 0.44 pp 反解得到，不是拟合随机数据。
+    const SYNTH_S_RMS: f32 = 12.5;
+    const SYNTH_SIGMA_CH: f32 = 0.6756;
+    const SYNTH_DOF: f32 = 2_000.0 - 2.0;
+
+    fn synth_sse() -> f32 {
+        3.0 * SYNTH_DOF * SYNTH_SIGMA_CH * SYNTH_SIGMA_CH
+    }
+
+    // 把累加器填成指定状态：结构门全过（R = 0、d = 0.25、z = 0），半窗同 θ。
+    fn synth_state(gate: &mut GainGate, groups: u32, sse: f32) {
+        let g = GateParams::FROZEN.group_samples as f32;
+        gate.accum.groups = groups;
+        gate.accum.a0 = 0.0;
+        gate.accum.a1 = 3.0 * g * SYNTH_S_RMS * SYNTH_S_RMS;
+        gate.accum.weight = 2_000.0;
+        gate.accum.sse = sse;
+        gate.accum.s = [1.0, 0.0, 0.0, 1.0];
+        gate.accum.b = [0.0, 0.0];
+        gate.accum.rsum = [0.0, 0.0];
+        gate.accum.ri2 = 1.0;
+        gate.accum.rn = 1;
+        gate.accum.theta = [1.0, 1.0];
+        let half = HalfWindow {
+            s: [1.0, 0.0, 0.0, 1.0],
+            b: [0.5, 0.5],
+            weight: 100.0,
+            n: 100,
+        };
+        gate.half_a = half;
+        gate.half_b = half;
+    }
+
+    fn synth_gate(half_width_lsb: f32, groups: u32, sse: f32) -> GainGate {
+        let mut gate = gate();
+        gate.set_zero_uncertainty_lsb(half_width_lsb);
+        synth_state(&mut gate, groups, sse);
+        gate
+    }
+
+    #[test]
+    fn zero_uncertainty_flips_precision_gate() {
+        // P0 证据：同一状态，`do2 = 0` 时 pred = 0.440 pp ≤ 0.45（Trusted），
+        // `do2 = 1/12` 时 pred = 0.493 pp > 0.45（UntrustedAmplitude）。
+        // 若把 do2 改回恒 0，第二个断言立刻失败。
+        let sse = synth_sse();
+        let probe_without = synth_gate(0.0, 200, sse);
+        let probe_with = synth_gate(policy::DO_LSB_HALF_WIDTH, 200, sse);
+        let pred_without = match probe_without.pred_pp() {
+            Some(v) => v,
+            None => panic!("pred_pp is None"),
+        };
+        let pred_with = match probe_with.pred_pp() {
+            Some(v) => v,
+            None => panic!("pred_pp is None"),
+        };
+        let threshold = GateParams::FROZEN.kappa * GateParams::FROZEN.target_pp;
+        assert!(
+            pred_without <= threshold && pred_with > threshold,
+            "pred(0) = {pred_without} pp, pred(1/12) = {pred_with} pp, threshold = {threshold} pp"
+        );
+        let expected_delta = 100.0 * policy::DO2_LSB2 / (SYNTH_S_RMS * SYNTH_S_RMS);
+        assert!(
+            (pred_with - pred_without - expected_delta).abs() < 1e-3,
+            "do2 contribution = {} pp, expected {expected_delta} pp",
+            pred_with - pred_without
+        );
+
+        // 真实组窗边界：groups = G-1，再推一拍"减零位后为 0"的样本；
+        // sse 预乘 1/λ 抵消 push_sample 的遗忘，使边界时刻的 sse 恰为目标值。
+        let mut without = synth_gate(0.0, 199, sse / policy::LAMBDA);
+        let mut with = synth_gate(policy::DO_LSB_HALF_WIDTH, 199, sse / policy::LAMBDA);
+        let _ = without.step(raw([0.0, 0.0, 0.0]), true);
+        let _ = with.step(raw([0.0, 0.0, 0.0]), true);
+
+        assert!(without.pred_ok, "δo²=0 应通过精度门");
+        assert!(!with.pred_ok, "δo²=1/12 应被精度门拒绝");
+        assert_eq!(without.trust(), Trust::Trusted);
+        assert_eq!(with.trust(), Trust::UntrustedAmplitude);
+    }
+
+    #[test]
+    fn zero_uncertainty_survives_reset() {
+        // 零位不确定度是标定属性，不是窗内统计量：reset 只能清窗，不能把它清成 0。
+        let mut gate = frozen_gate();
+        gate.set_zero_uncertainty_lsb(0.25);
+        let expected = (0.5_f32 * 0.5_f32) / 12.0;
+        assert!((gate.accum.do2 - expected).abs() < 1e-9);
+        gate.reset();
+        assert_eq!(gate.zero_uncertainty_lsb(), 0.25);
+        assert!((gate.accum.do2 - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn default_zero_uncertainty_is_one_twelfth_lsb2() {
+        // 默认值不是 0：0.5 LSB 半宽 ⇒ δo² = (2·0.5)²/12 = 1/12 LSB²。
+        let gate = frozen_gate();
+        assert_eq!(gate.zero_uncertainty_lsb(), policy::DO_LSB_HALF_WIDTH);
+        assert!((gate.accum.do2 - 1.0 / 12.0).abs() < 1e-7);
     }
 
     #[test]
@@ -1177,15 +1335,15 @@ mod tests {
         let mut rng = Lcg::new(101);
         let mut rot = Rot::new();
         let peak = core::f32::consts::SQRT_2 * 0.14 * LSB_PER_AMP;
-        let sigma_ch = 1.5;
+        let sigma_ch_std_lsb = 1.5;
         for _ in 0..2_000 {
             rot.step(FULL_STEP_COS, FULL_STEP_SIN);
             let [a, b, c] = rot.iabc(peak);
             gate.accum.push_sample(
                 [
-                    a + rng.noise(sigma_ch),
-                    b + rng.noise(sigma_ch),
-                    c + rng.noise(sigma_ch),
+                    a + rng.noise(sigma_ch_std_lsb),
+                    b + rng.noise(sigma_ch_std_lsb),
+                    c + rng.noise(sigma_ch_std_lsb),
                 ],
                 1.0,
             );
@@ -1204,15 +1362,15 @@ mod tests {
         let mut rng = Lcg::new(103);
         let mut rot = Rot::new();
         let peak = core::f32::consts::SQRT_2 * 0.55 * LSB_PER_AMP;
-        let sigma_ch = 1.5;
+        let sigma_ch_std_lsb = 1.5;
         for _ in 0..2_000 {
             rot.step(FULL_STEP_COS, FULL_STEP_SIN);
             let [a, b, c] = rot.iabc(peak);
             gate.accum.push_sample(
                 [
-                    a + rng.noise(sigma_ch),
-                    b + rng.noise(sigma_ch),
-                    c + rng.noise(sigma_ch),
+                    a + rng.noise(sigma_ch_std_lsb),
+                    b + rng.noise(sigma_ch_std_lsb),
+                    c + rng.noise(sigma_ch_std_lsb),
                 ],
                 1.0,
             );
@@ -1268,7 +1426,7 @@ mod tests {
             let _ = push(&mut gate, s);
         }
         let weight = gate.accum.weight;
-        let n_invalid = u32::from(limits::INVALID_SAMPLE_LIMIT) + 1;
+        let n_invalid = u32::from(policy::INVALID_SAMPLE_LIMIT) + 1;
         for _ in 0..n_invalid {
             assert!(gate.step(raw([0.0, 0.0, 0.0]), false).is_none());
         }

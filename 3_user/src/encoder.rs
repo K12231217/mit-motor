@@ -12,7 +12,7 @@
 //!      D[13:0]    Mg     CRC
 //! ```
 //!
-//! - `D`：14 bit 绝对角，16384 计数 = 2π（[`limits::ENC_COUNTS_PER_REV`]）。
+//! - `D`：14 bit 绝对角，16384 计数 = 2π（[`hw::ENC_COUNTS_PER_REV`]）。
 //! - `Mg[1:0]`：0 正常 / 1 磁场过强 / 2 磁场过弱 / 3 保留；`Mg[2]` 按压或气隙突变；
 //!   `Mg[3]` 超速或失锁。不同手册版本对 `Mg[3]` 的命名不一致，这里只当"角度无效"，
 //!   不按名字区分原因。
@@ -24,20 +24,20 @@
 //! 1. CRC 残差为 0，否则 [`Fault::Crc`]；
 //! 2. `Mg[3] == 0`，否则 [`Fault::MagLock`]；
 //! 3. 全 0 帧护栏：`0x000000` 是合法帧（θ=0、Mg=0、CRC=0），与 MISO 恒低不可区分；
-//!    连续 [`limits::ENC_ZERO_FRAME_LIMIT`] 帧全 0 且此前接受角非 0 时判
+//!    连续 [`policy::ENC_ZERO_FRAME_LIMIT`] 帧全 0 且此前接受角非 0 时判
 //!    [`Fault::ZeroFrame`]。靠近回绕处的前几帧全 0 还能通过跳变判据，正是它抓这些帧；
 //! 4. 相邻接受帧的角度差 `|Δθ| ≤ (missed + 1) · B`，`B` 由 [`jump_limit_lsb`] 按
 //!    `ceil(ω_max · T_s / (2π/16384)) + 4` 算出，否则 [`Fault::Jump`]。
 //!
 //! 软告警：`Mg[1:0] != 0` 不拒帧，输出 [`Health::MagWarn`] 由上层降额；连续
-//! [`limits::ENC_MAG_WARN_LIMIT`] 帧不消失升级为 [`Fault::MagStuck`]。
+//! [`policy::ENC_MAG_WARN_LIMIT`] 帧不消失升级为 [`Fault::MagStuck`]。
 //!
 //! # 去抖与丢失窗口
 //!
 //! CRC 错只说明这一帧丢了，不说明传感器坏：它只计入 `missed`，不增加语义故障的连续
 //! 数。语义故障（`Mg[3]`、全 0 护栏、跳变、磁场异常升级）连续
-//! [`limits::ENC_FAIL_LATCH_FRAMES`] 帧锁存。任何未接受帧都计入 `missed`，连续超过
-//! [`limits::ENC_MAX_MISS`] 帧直接锁存。
+//! [`policy::ENC_FAIL_LATCH_FRAMES`] 帧锁存。任何未接受帧都计入 `missed`，连续超过
+//! [`policy::ENC_MAX_MISS`] 帧直接锁存。
 //!
 //! 跳变界随丢失拍数线性放宽为 `(missed + 1) · B`：`B` 本来就是一个周期的最大位移，
 //! 丢了几拍就该按几拍算，否则一次 CRC 抖动后的恢复帧会被误判成跳变（20 kHz 下这类
@@ -46,10 +46,11 @@
 //!
 //! 锁存后角度冻结在最后一次接受的样本，只有 [`EncoderMonitor::reset`] 能清除。
 
-use contracts::limits;
+use crate::policy;
+use contracts::limits::{budget, hw};
 
 // 一圈的计数（u32 形态，便于移位与取模）。
-const COUNTS_PER_REV: u32 = limits::ENC_COUNTS_PER_REV as u32;
+const COUNTS_PER_REV: u32 = hw::ENC_COUNTS_PER_REV as u32;
 
 // 半圈计数：有符号 14 bit 差值的回绕中点。
 const HALF_TURN: i32 = COUNTS_PER_REV as i32 / 2;
@@ -58,7 +59,7 @@ const HALF_TURN: i32 = COUNTS_PER_REV as i32 / 2;
 const TURN_MASK: i32 = COUNTS_PER_REV as i32 - 1;
 
 // CRC 域的掩码（6 bit）。
-const CRC_MASK: u32 = (1 << limits::ENC_CRC_BITS) - 1;
+const CRC_MASK: u32 = (1 << hw::ENC_CRC_BITS) - 1;
 
 // 每计数对应的弧度：`2π / 16384`；除数是 2 的幂，结果精确。
 const RAD_PER_COUNT: f32 = core::f32::consts::TAU / COUNTS_PER_REV as f32;
@@ -104,7 +105,7 @@ pub enum Fault {
     ZeroFrame,
     /// 相邻接受帧的角度变化超过 [`jump_limit_lsb`]。
     Jump,
-    /// 磁场异常连续 [`limits::ENC_MAG_WARN_LIMIT`] 帧未消失。
+    /// 磁场异常连续 [`policy::ENC_MAG_WARN_LIMIT`] 帧未消失。
     MagStuck,
 }
 
@@ -156,7 +157,7 @@ pub fn angle_rad(angle_raw: u16) -> f32 {
 /// 用关节机械极限而不是 MT6701 的 55 000 rpm 传感器上限：传感器能转多快
 /// 不重要，机械结构允许多快才决定"一拍内真实角度最多走多少计数"。
 pub fn jump_limit_lsb(omega_max_rpm: f32, period_us: u32) -> u16 {
-    let counts_per_second = omega_max_rpm / 60.0 * f32::from(limits::ENC_COUNTS_PER_REV);
+    let counts_per_second = omega_max_rpm / 60.0 * f32::from(hw::ENC_COUNTS_PER_REV);
     let counts_per_period = counts_per_second * (period_us as f32) * 1e-6;
     if !counts_per_period.is_finite() {
         return u16::MAX;
@@ -168,11 +169,11 @@ pub fn jump_limit_lsb(omega_max_rpm: f32, period_us: u32) -> u16 {
     } else {
         whole
     };
-    let total = ceiled.saturating_add(u32::from(limits::ENC_JUMP_MARGIN_LSB));
+    let total = ceiled.saturating_add(u32::from(policy::ENC_JUMP_MARGIN_LSB));
     total.min(u32::from(u16::MAX)) as u16
 }
 
-/// 跳变判据与去抖门限。计数类门限来自 [`limits`]，`jump_limit_lsb` 由
+/// 跳变判据与去抖门限。计数类门限来自 [`policy`]，`jump_limit_lsb` 由
 /// [`EncoderParams::new`] 按机械转速上限算出。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EncoderParams {
@@ -189,14 +190,14 @@ pub struct EncoderParams {
 }
 
 impl EncoderParams {
-    /// 按机械转速上限（rpm）与环周期（µs）构造；计数门限取 [`limits`] 的默认值。
+    /// 按机械转速上限（rpm）与环周期（µs）构造；计数门限取 [`policy`] 的默认值。
     pub fn new(omega_max_rpm: f32, period_us: u32) -> Self {
         Self {
             jump_limit_lsb: jump_limit_lsb(omega_max_rpm, period_us),
-            zero_frame_limit: limits::ENC_ZERO_FRAME_LIMIT,
-            mag_warn_limit: limits::ENC_MAG_WARN_LIMIT,
-            latch_frames: limits::ENC_FAIL_LATCH_FRAMES,
-            max_miss: limits::ENC_MAX_MISS,
+            zero_frame_limit: policy::ENC_ZERO_FRAME_LIMIT,
+            mag_warn_limit: policy::ENC_MAG_WARN_LIMIT,
+            latch_frames: policy::ENC_FAIL_LATCH_FRAMES,
+            max_miss: policy::ENC_MAX_MISS,
         }
     }
 }
@@ -204,7 +205,7 @@ impl EncoderParams {
 impl Default for EncoderParams {
     /// `ω_max = ENC_MECH_RPM_MAX`（3000 rpm）、`T_s = ISR_PERIOD_US`（50 µs）。
     fn default() -> Self {
-        Self::new(limits::ENC_MECH_RPM_MAX, limits::ISR_PERIOD_US)
+        Self::new(policy::ENC_MECH_RPM_MAX, budget::ISR_PERIOD_US)
     }
 }
 
@@ -397,9 +398,9 @@ fn wrap_delta(new: u16, old: u16) -> i32 {
 //
 // 24 bit 长除法：把 `payload << 6` 逐位除以 `0x43`，余数即 CRC。
 const fn crc6(payload: u32) -> u8 {
-    const POLY: u32 = limits::ENC_CRC_POLY as u32;
-    const SHIFT: u32 = limits::ENC_CRC_BITS as u32;
-    const BITS: u32 = limits::ENC_FRAME_BITS as u32;
+    const POLY: u32 = hw::ENC_CRC_POLY as u32;
+    const SHIFT: u32 = hw::ENC_CRC_BITS as u32;
+    const BITS: u32 = hw::ENC_FRAME_BITS as u32;
     let mut reg = payload << SHIFT;
     let mut i = BITS;
     while i > SHIFT {
@@ -420,18 +421,18 @@ pub fn parse(raw: [u8; 3]) -> Result<Frame, FrameError> {
     let [hi, mid, lo] = raw;
     let word = (u32::from(hi) << 16) | (u32::from(mid) << 8) | u32::from(lo);
     let crc = (word & CRC_MASK) as u8;
-    if crc6(word >> limits::ENC_CRC_BITS) != crc {
+    if crc6(word >> hw::ENC_CRC_BITS) != crc {
         return Err(FrameError::Crc);
     }
     Ok(Frame {
-        angle_raw: (word >> (limits::ENC_MAG_BITS + limits::ENC_CRC_BITS)) as u16,
-        mag: ((word >> limits::ENC_CRC_BITS) & 0x0F) as u8,
+        angle_raw: (word >> (hw::ENC_MAG_BITS + hw::ENC_CRC_BITS)) as u16,
+        mag: ((word >> hw::ENC_CRC_BITS) & 0x0F) as u8,
         crc,
     })
 }
 
 // 常数与 `limits` 的一致性。
-const _: () = assert!(COUNTS_PER_REV == 1 << limits::ENC_ANGLE_BITS);
+const _: () = assert!(COUNTS_PER_REV == 1 << hw::ENC_ANGLE_BITS);
 const _: () = assert!(HALF_TURN * 2 == COUNTS_PER_REV as i32);
 
 #[cfg(test)]
@@ -446,8 +447,8 @@ mod tests {
 
     /// 构造合法帧：14 bit 角 + 4 bit Mg + 6 bit CRC。
     fn encode(angle_raw: u16, mag: u8) -> [u8; 3] {
-        let payload = (u32::from(angle_raw) << limits::ENC_MAG_BITS) | u32::from(mag & 0x0F);
-        let word = (payload << limits::ENC_CRC_BITS) | u32::from(crc6(payload));
+        let payload = (u32::from(angle_raw) << hw::ENC_MAG_BITS) | u32::from(mag & 0x0F);
+        let word = (payload << hw::ENC_CRC_BITS) | u32::from(crc6(payload));
         bytes_of(word)
     }
 
@@ -455,7 +456,7 @@ mod tests {
     fn known_frame_parses_to_frozen_fields() {
         // 一手手册样例帧：θ=16030、Mg=0、CRC=0x1B。
         let word = 0x00FA_781B;
-        assert_eq!(crc6(word >> limits::ENC_CRC_BITS), 0x1B);
+        assert_eq!(crc6(word >> hw::ENC_CRC_BITS), 0x1B);
 
         let raw = bytes_of(word);
         let frame = match parse(raw) {
@@ -468,7 +469,7 @@ mod tests {
         assert_eq!(frame.field_code(), 0);
         assert!(!frame.is_locked());
 
-        let expected = 16_030.0 * core::f32::consts::TAU / f32::from(limits::ENC_COUNTS_PER_REV);
+        let expected = 16_030.0 * core::f32::consts::TAU / f32::from(hw::ENC_COUNTS_PER_REV);
         assert!((angle_rad(frame.angle_raw) - expected).abs() < 1e-6);
     }
 
@@ -490,7 +491,7 @@ mod tests {
         // 24 个位置逐一翻转（角度 14 bit、Mg 4 bit、CRC 6 bit 全覆盖）。
         let word = 0x00FA_781Bu32;
         let mut pos = 0;
-        while pos < u32::from(limits::ENC_FRAME_BITS) {
+        while pos < u32::from(hw::ENC_FRAME_BITS) {
             let flipped = word ^ (1u32 << pos);
             assert_eq!(parse(bytes_of(flipped)), Err(FrameError::Crc), "bit {pos}");
             pos += 1;
@@ -653,6 +654,13 @@ mod tests {
         assert_eq!(jump_limit_lsb(3_000.0, 100), 86);
         // 默认参数就是机械极限 3000 rpm / 50 µs。
         assert_eq!(EncoderParams::default().jump_limit_lsb, 45);
+        // `policy::B_MAX_LSB` 是同一算式的 const 手算镜像（f32 版本不能进 const），
+        // 盲推断言依赖它，所以这里钉住两者相等。
+        assert_eq!(policy::B_MAX_LSB, 45);
+        assert_eq!(
+            jump_limit_lsb(policy::ENC_MECH_RPM_MAX, budget::ISR_PERIOD_US),
+            policy::B_MAX_LSB
+        );
     }
 
     /// 单个 CRC 位翻转的坏帧（payload 合法但帧尾错）。
@@ -686,8 +694,9 @@ mod tests {
         let mut monitor = EncoderMonitor::new(EncoderParams::default());
         assert_eq!(monitor.update(encode(2_000, 0)).health, Health::Ok);
 
+        // 盲推窗口 = MAX_BLIND_US / ISR_PERIOD_US = 1 拍：先丢一帧。
         let mut i = 0;
-        while i < 3 {
+        while i < policy::ENC_MAX_MISS {
             assert_eq!(
                 monitor.update(broken_frame()).health,
                 Health::Rejected(Fault::Crc),
@@ -695,12 +704,23 @@ mod tests {
             );
             i += 1;
         }
-        assert_eq!(monitor.missed_frames(), 3);
+        assert_eq!(monitor.missed_frames(), policy::ENC_MAX_MISS);
 
-        // missed = 3 ⇒ allow = 4B；4B 内的位移必须接受，而不是误判跳变。
-        let out = monitor.update(encode(2_000 + 4 * b - 1, 0));
+        // missed = 1 ⇒ allow = 2B；2B 内的位移必须接受，而不是误判跳变。
+        let out = monitor.update(encode(2_000 + 2 * b - 1, 0));
         assert_eq!(out.health, Health::Ok);
         assert_eq!(monitor.missed_frames(), 0);
+
+        // 放宽是按丢失拍数线性给的，不会多给：同样一次丢失后位移 2B+1 必须拒，
+        // 且这一次失败把 missed 推到 max_miss 之上，直接锁存。
+        let mut strict = EncoderMonitor::new(EncoderParams::default());
+        assert_eq!(strict.update(encode(2_000, 0)).health, Health::Ok);
+        assert_eq!(
+            strict.update(broken_frame()).health,
+            Health::Rejected(Fault::Crc)
+        );
+        let out = strict.update(encode(2_000 + 2 * b + 1, 0));
+        assert_eq!(out.health, Health::Latched(Fault::Jump));
     }
 
     #[test]
@@ -709,7 +729,7 @@ mod tests {
         assert_eq!(monitor.update(encode(3_000, 0)).health, Health::Ok);
 
         let mut i = 0;
-        while i < limits::ENC_MAX_MISS {
+        while i < policy::ENC_MAX_MISS {
             let out = monitor.update(broken_frame());
             assert_eq!(out.health, Health::Rejected(Fault::Crc), "miss {i}");
             assert!(!out.health.is_latched());
@@ -720,7 +740,7 @@ mod tests {
             monitor.update(broken_frame()).health,
             Health::Latched(Fault::Crc)
         );
-        assert_eq!(monitor.missed_frames(), limits::ENC_MAX_MISS + 1);
+        assert_eq!(monitor.missed_frames(), policy::ENC_MAX_MISS + 1);
         // 锁存后即使来好帧也不接受（只能显式 reset）。
         assert_eq!(
             monitor.update(encode(3_000, 0)).health,

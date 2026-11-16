@@ -73,7 +73,7 @@ impl Q15 {
 }
 
 /// 三相调制量上限：`d ≤ D_MAX ⇒ |m| ≤ 2 · D_MAX - 1`。
-pub const MODULATION_MAX: f32 = 2.0 * limits::D_MAX - 1.0;
+pub const MODULATION_MAX: f32 = 2.0 * limits::hw::D_MAX - 1.0;
 
 /// [`MODULATION_MAX`] 的定点表示（四舍五入到最近的码），派生值，不引入新门限。
 ///

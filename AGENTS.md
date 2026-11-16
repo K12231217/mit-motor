@@ -26,7 +26,7 @@
 | PRE-04 | **跨优先级只有两种通道**：seqlock `Snapshot<T>` 与有界队列；**单写者**；满即丢并计数；禁重试循环 | 每个队列有 `dropped` 计数器且进状态字 |
 | PRE-05 | **无静默继续**：时钟/CRC/magic 校验失败一律进 fault dump；禁 `unwrap/expect/indexing_slicing`（clippy deny）；关键错误不得 `let _ =` 吞掉 | `cargo xtask clippy -D warnings` |
 | PRE-06 | **量纲进标识符**：`_us/_rad/_rad_s/_amps/_v/_duty/_raw/_lsb`；同一参数不得跨模式换量纲 | review |
-| PRE-07 | **数值唯一来源**：门限、占空比上限、队列容量只在 `0_contracts/src/limits.rs`；文档只引编号不复写数值（现状：`limits.rs` 已落地，门控阈值全在此） | grep 数值重复 |
+| PRE-07 | **数值唯一来源**：器件事实与电气硬约束在 `0_contracts/src/limits/hw.rs`，时序与容量在 `limits/budget.rs`，策略参数在 `3_user/src/policy.rs`；文档只引编号不复写数值（现状：三处已分离，`limits/mod.rs` 汇总） | grep 数值重复 |
 | PRE-08 | **安全默认态**：上电六路输入全低、`nSLEEP` 低、`MOE=0`；S0–S5 全 PASS 才允许使能；故障**一律锁存**，清除需显式命令 + 无故障持续 T | 冷上电 LA 抓时序（E6） |
 | PRE-09 | **数字只由工具产生**：Flash/RAM/时序数字一律用 `cargo xtask size` 或实测输出回填，**禁止手写** | 文档里的数字必须能追到一条命令 |
 | PRE-10 | **契约唯一真源**：引脚只在 [`docs/hardware-requirements.md`](docs/hardware-requirements.md) §3；文件架构只在 [`docs/software-architecture.md`](docs/software-architecture.md)；硬件事实只在 [`docs/architecture.md`](docs/architecture.md) §2。其它文档只许指针，不许复制 | 改引脚时 grep 全仓只应命中一处 |
@@ -75,6 +75,9 @@ I4–I6 无检查实现。新建它们属于 Thread 的一部分，落地后才�
 | 7 | `σ̂_e` 的 √3 被双计：预测式里已有显式 √3，实现又用残差 σ（=√3·σ_ch）再乘一次，`pred` 第一项虚高 3 倍 | 真违规：同量纲两种口径混用 | 噪声口径必须写明"单通道 vs 残差方差"：`σ̂_ch=√(sse/(3(weight−2)))` 是单通道，残差方差 = 3σ_ch²，公式里的 √3 只乘一次 |
 | 8 | 把 `d = det S/tr²S` 当跨工况阈值（离线实测反序：arc 工况 `d=0.250` 误差 100 pp；单方向+变幅 `d=2.5e-7` 误差 1.40 pp；旋转 `d=4.1e-9` 误差 0.32 pp。实验脚本未入仓，数字来自 2026-11-16 数值实验记录） | 真违规：门限只在单一工况族内标定 | 任何门限必须给"跨工况单调性"证据；`d` 只作**同工况内**的无激励/秩亏门（`D_MIN=0.01`），不作跨工况精度判据 |
 | 9 | `#[repr(C, packed)]` + `forbid(unsafe_code)` + `deny(indexing_slicing)` 三者叠加：取字段要 `read_unaligned`（unsafe），按字节索引又被 clippy 禁，实现无路可走 | 设计封死：约束组合自相矛盾 | 线协议优先**自然对齐布局**（字段顺序/填充自己排，`size_of`+`offset_of!` 断言守形状），`packed` 只留给真正省字节且无解包路径的帧 |
+| 10 | 契约层混入策略参数：算法超参（`R_MAX`/`KAPPA`/`TARGET_PP`）与容错常数曾和 `D_MAX`、队列深度并列在一个 `limits.rs`，`0_contracts` 成了"调参表"（2026-11-16 已拆分） | 真违规：层次边界侵蚀 | `0_contracts` 只放器件事实与电气互锁断言（`limits/hw.rs`、`limits/budget.rs`）；策略参数进 `3_user/src/policy.rs`。review 时见 `0_contracts/src/limits/` 出现可调超参即打回 |
+| 11 | 字段有初值、却没有设置者：`GainAccum::do2` 曾有默认值 `0.0` 且构造后无写入路径，`pred` 第二项 `(σ̂_e² + δo²)` 退化成 `σ̂_e²`——零位残余不确定度从未生效 | 真违规：不确定度字段两侧未闭合 | 任何"不确定度 / 协方差"类字段必须两侧闭合：有默认值 + 有设置路径 + 有测试证明它非零时行为改变（`do2 > 0` ⇒ `pred` 必须更大）。现行闭合点：`gate.rs` 构造取 `do2_from_half_width(DO_LSB_HALF_WIDTH)`、`set_zero_uncertainty_lsb` 重算、`pred` 第二项使用 |
+| 12 | 容错常数写成裸整数却与物理量耦合：原 `ENC_MAX_MISS = 5` 折算 `(5+1) × 45 LSB × 14 极对 × 360 / 16384 ≈ 83°` 电角，"5 帧"无法解释、改转速时也不知道要不要改 | 真违规：时间窗被截成拍数 | 凡是"能容忍多久 / 多久算丢多久"的常数必须由时间窗或物理界限派生，并配编译期断言；现行做法见 `3_user/src/policy.rs`：`ENC_MAX_MISS=1` 由 `THETA_E_MAX_DEG=30` 与 `MAX_BLIND_US` 反解，文件末尾两条 `const _` 守混叠底线与电角度底线 |
 
 ## 5. 上下文装载（换会话不断档）
 

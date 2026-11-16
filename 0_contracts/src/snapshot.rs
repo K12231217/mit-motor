@@ -22,7 +22,7 @@
 //!
 //! 高优先级读者运行时低优先级写者被冻结，`seq` 不可能在两次 load 之间变化，一次判定
 //! 就够；低优先级读者会被写者抢占，只能从 `s0` 重试到 `s1 == s0`，上限
-//! [`crate::limits::SNAPSHOT_RETRY_MAX`] 次，仍不收敛就用上一拍值，绝不阻塞。
+//! [`crate::limits::budget::SNAPSHOT_RETRY_MAX`] 次，仍不收敛就用上一拍值，绝不阻塞。
 //!
 //! 最坏 4 ×（读 `seq` + 16 word 拷贝 + 读 `seq`）≈ 80 cycles ≈ 0.47 µs @170 MHz，
 //! 已计入 25 µs 的 ISR 预算。
@@ -138,7 +138,7 @@ pub struct CmdView {
     pub flags: u8,
     /// 保留，必须为 0（layout 稳定性占位）。
     pub rsvd0: u8,
-    /// 生存期，毫秒；0 = 用 `limits::CAN_TIMEOUT_MS`。
+    /// 生存期，毫秒；0 = 用 `limits::budget::CAN_TIMEOUT_MS`。
     pub ttl_ms: u16,
     /// 保留，必须为 0。
     pub rsvd1: u16,
@@ -301,12 +301,12 @@ impl FastSnapshot {
             .map(|words| FastView::decode(&words))
     }
 
-    /// 有界重试（≤ [`limits::SNAPSHOT_RETRY_MAX`] 次），绝不阻塞。
+    /// 有界重试（≤ [`limits::budget::SNAPSHOT_RETRY_MAX`] 次），绝不阻塞。
     ///
     /// 写者是 prio 8，会在读者执行期间抢占并完成发布，重试到 `s1 == s0` 即可；用完
     /// 次数仍不收敛就返回 `None`，调用方用上一拍值。
     pub fn read_retry(&self) -> Option<FastView> {
-        read_words(&self.seq, &self.w, limits::SNAPSHOT_RETRY_MAX)
+        read_words(&self.seq, &self.w, limits::budget::SNAPSHOT_RETRY_MAX)
             .0
             .map(|words| FastView::decode(&words))
     }
@@ -352,7 +352,7 @@ impl CmdSnapshot {
     /// 得到 `None`；读开始于偶数时 `read_once` 已经成功。保留它是为了三个快照的 API
     /// 形状一致，不允许在电流环里调用。
     pub fn read_retry(&self) -> Option<CmdView> {
-        read_words(&self.seq, &self.w, limits::SNAPSHOT_RETRY_MAX)
+        read_words(&self.seq, &self.w, limits::budget::SNAPSHOT_RETRY_MAX)
             .0
             .map(|words| CmdView::decode(&words))
     }
@@ -391,10 +391,10 @@ impl GainSnapshot {
             .map(|words| GainView::decode(&words))
     }
 
-    /// 有界重试（≤ [`limits::SNAPSHOT_RETRY_MAX`] 次）：读者 prio 5 会被写者
+    /// 有界重试（≤ [`limits::budget::SNAPSHOT_RETRY_MAX`] 次）：读者 prio 5 会被写者
     /// prio 2 抢占，但有界，绝不阻塞。
     pub fn read_retry(&self) -> Option<GainView> {
-        read_words(&self.seq, &self.w, limits::SNAPSHOT_RETRY_MAX)
+        read_words(&self.seq, &self.w, limits::budget::SNAPSHOT_RETRY_MAX)
             .0
             .map(|words| GainView::decode(&words))
     }
@@ -436,7 +436,7 @@ const _: () = assert!(core::mem::offset_of!(GainView, chi2) == 28);
 const _: () = assert!(core::mem::size_of::<FastSnapshot>() == 4 + 4 * FAST_WORDS);
 const _: () = assert!(core::mem::size_of::<CmdSnapshot>() == 4 + 4 * CMD_WORDS);
 const _: () = assert!(core::mem::size_of::<GainSnapshot>() == 4 + 4 * GAIN_WORDS);
-const _: () = assert!(limits::SNAPSHOT_RETRY_MAX == 4);
+const _: () = assert!(limits::budget::SNAPSHOT_RETRY_MAX == 4);
 
 #[cfg(test)]
 mod tests {
@@ -556,9 +556,9 @@ mod tests {
         // 生产入口：上限来自 limits，永不超界，并且不阻塞（顺序执行即证明）。
         assert_eq!(snap.read_retry(), None);
         assert_eq!(snap.read_once(), None);
-        let (out, attempts) = read_words(&snap.seq, &snap.w, limits::SNAPSHOT_RETRY_MAX);
+        let (out, attempts) = read_words(&snap.seq, &snap.w, limits::budget::SNAPSHOT_RETRY_MAX);
         assert!(out.is_none());
-        assert!(attempts <= limits::SNAPSHOT_RETRY_MAX);
+        assert!(attempts <= limits::budget::SNAPSHOT_RETRY_MAX);
     }
 
     /// 上行方向（prio 2–5 写、prio 8 读）：写者被冻结在中间态时，重试不可能把结果
@@ -572,9 +572,9 @@ mod tests {
         assert_eq!(snap.read_once(), None);
         assert_eq!(snap.read_retry(), None);
 
-        let (out, attempts) = read_words(&snap.seq, &snap.w, limits::SNAPSHOT_RETRY_MAX);
+        let (out, attempts) = read_words(&snap.seq, &snap.w, limits::budget::SNAPSHOT_RETRY_MAX);
         assert!(out.is_none());
-        assert_eq!(attempts, limits::SNAPSHOT_RETRY_MAX);
+        assert_eq!(attempts, limits::budget::SNAPSHOT_RETRY_MAX);
         assert_eq!(snap.seq.load(Ordering::Relaxed), 1, "读者不得改写 seq");
     }
 

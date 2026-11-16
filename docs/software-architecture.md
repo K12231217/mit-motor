@@ -36,7 +36,8 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/faults.rs         #   FaultCode + 32 bit 状态字位定义
   src/icd.rs            #   TraceFrame / CanFrame 的 repr(C) 布局 + 编译期 size 断言
   src/traits.rs         #   Hw / Clock / LogSink / Persist（跨层抽象）
-  src/limits.rs         #   D_MAX、窗口下限、电流阈值 —— 全工程唯一数值来源
+  src/limits/hw.rs      #   器件事实与电气硬约束（D_MAX、采样窗口、MT6701 位宽）
+  src/limits/budget.rs  #   系统预算（环频率、帧率、队列容量、看门狗）
 
 1_bsp/                  # 唯一 unsafe 层（包名 bsp）
   src/lib.rs            #   Board 类型、外设单例 take、所有权表

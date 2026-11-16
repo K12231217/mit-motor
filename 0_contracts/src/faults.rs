@@ -44,7 +44,7 @@ pub enum FaultCode {
     AdcTimeout = 8,
     /// 9 标定被锁存（跨工况不一致 / 闸门反复失败）。
     CalibLatched = 9,
-    /// 10 通信看门狗超时（> `limits::CAN_TIMEOUT_MS`）。
+    /// 10 通信看门狗超时（> `limits::budget::CAN_TIMEOUT_MS`）。
     CommTimeout = 10,
     /// 11 `HardFault` / panic 入口（故障现场保留路径）。
     HardFault = 11,

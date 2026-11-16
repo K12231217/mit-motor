@@ -26,6 +26,7 @@
 
 pub mod encoder;
 pub mod gate;
+pub mod policy;
 
 pub use crate::encoder::{
     angle_rad, jump_limit_lsb, parse, AngleOutcome, EncoderMonitor, EncoderParams, Fault, Frame,

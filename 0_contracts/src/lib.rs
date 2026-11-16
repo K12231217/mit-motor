@@ -76,7 +76,7 @@ mod tests {
             seq: 0x5A,
             flags: icd::CMD_FLAG_ENABLE,
             rsvd0: 0,
-            ttl_ms: limits::CAN_TIMEOUT_MS,
+            ttl_ms: limits::budget::CAN_TIMEOUT_MS,
             rsvd1: 0,
         }
     }
@@ -97,7 +97,7 @@ mod tests {
         CmdFrame {
             mode: Mode::Standby.as_u8(),
             flags: icd::CMD_FLAG_ENABLE,
-            ttl_ms: limits::CAN_TIMEOUT_MS,
+            ttl_ms: limits::budget::CAN_TIMEOUT_MS,
             i_d_ref_ma: 0,
             i_q_ref_ma: 500,
             seq: 7,
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn duty_clamp_holds_d_max_0p80() {
         // 结论：D_MAX = 0.80 ⇒ |m| ≤ MODULATION_MAX = 0.6；量化边界是 19661。
-        assert_eq!(limits::D_MAX, 0.80);
+        assert_eq!(limits::hw::D_MAX, 0.80);
         assert!((types::MODULATION_MAX - 0.6).abs() < f32::EPSILON);
         assert_eq!(types::MODULATION_MAX_RAW, 19_661);
 
@@ -346,16 +346,17 @@ mod tests {
 
     #[test]
     fn mt6701_frame_is_14_plus_4_plus_6_bits() {
-        // 结论：帧 = 14b 角度 + 4b Mg + 6b CRC = 24 bit，SPI 10.625 MHz。
-        assert_eq!(limits::ENC_FRAME_BITS, 24);
-        assert_eq!(limits::ENC_ANGLE_BITS, 14);
-        assert_eq!(limits::ENC_MAG_BITS, 4);
-        assert_eq!(limits::ENC_CRC_BITS, 6);
+        // 结论：帧 = 14b 角度 + 4b Mg + 6b CRC = 24 bit；SPI 上限 15.625 MHz
+        // （t_CLK ≥ 64 ns），10.625 MHz 是 `user::policy` 的分频选择。
+        assert_eq!(limits::hw::ENC_FRAME_BITS, 24);
+        assert_eq!(limits::hw::ENC_ANGLE_BITS, 14);
+        assert_eq!(limits::hw::ENC_MAG_BITS, 4);
+        assert_eq!(limits::hw::ENC_CRC_BITS, 6);
         assert_eq!(
-            limits::ENC_FRAME_BITS,
-            limits::ENC_ANGLE_BITS + limits::ENC_MAG_BITS + limits::ENC_CRC_BITS
+            limits::hw::ENC_FRAME_BITS,
+            limits::hw::ENC_ANGLE_BITS + limits::hw::ENC_MAG_BITS + limits::hw::ENC_CRC_BITS
         );
-        assert_eq!(limits::ENC_SPI_HZ, 10_625_000);
+        assert_eq!(limits::hw::ENC_SPI_MAX_HZ, 15_625_000);
     }
 
     #[test]
