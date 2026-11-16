@@ -14,3 +14,7 @@
 
 # 根 workspace（0_contracts + 3_user）的 host 构建目录。
 /target/
+
+# 厂商资料（DS 的 Markdown/SVG/zip）不入库：体积大、可重新下载，引脚事实在文档里引用路径与章节号。
+docs/DS_stm32g474rb/
+docs/DS_stm32g474rb.zip
