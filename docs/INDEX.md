@@ -152,6 +152,29 @@ RM0440 Table 7，由 ST 员工对 G474RB 逐字确认）。槽起点 `0x0804_000
   （ADR 需重开"制动策略"分支）；或 `1_bsp` 的 flash 驱动无法在 bank 2 内按页擦写
   （例如页大小不是 2 KB，`hw::FLASH_PAGE_BYTES` 与槽断言会先编译失败）。
 
+### ADR-10 驱动所有权 = move 移交；设备族 = enum 静态分发（已定，2026-11-19）
+
+候选（初始化与存储）：全局 `static mut` / `static Option<Periph>` + 运行期 `take()`、
+**`init` 构造具体类型后 move 给任务** → 选后者。
+理由：`take()` 把"是否初始化"从编译期推到每个热路径分支，初始化顺序错误只能到运行时才炸；
+`static mut` 还要额外 `unsafe` 白名单，和 PRE-02 的零锁/零分支相冲。move 之后类型系统直接保证
+"拿到就能用"，热路径只剩字段访问。
+
+候选（异构设备）：`dyn Trait` 运行时分发、多层泛型/关联类型的通用库、**enum + `match` 静态分发** → 选后者。
+理由：本板设备族封闭（MP6540HA + MT6701；整机 RM/DM/UT 三类），扩展点在编译期就已知；
+enum 让新增设备型变成编译错误而不是漏实现，也不为 vtable 和单态化膨胀付费。
+
+候选（失配表达）：热路径返回 `Option/Result`、**构造点 `try_new() -> Result`，热路径 `()`** → 选后者。
+理由：采样/出力入口每 50 µs 跑一次，合法性（`Duty` 夹限、`RawSample3` 三路齐全）在构造点一次验完；
+热路径再判一次只增加分支与未处理分支。纯算法查询（`GainGate::solve() -> Option`）保留 `Option`，
+那是"值是否可解"，不是"外设是否就绪"。
+
+代价：跨任务只能拿到 `Snapshot<T>` 的值，拿不到驱动句柄；需要"读改写外设"的需求必须回到所有者任务。
+新增设备型必须改 enum（故意）。详见 `AGENTS.md` §1.1 MECH-01…04 与 `software-architecture.md` §3.3。
+- 失效条件：固件需要运行时发现/插拔未知设备型（enum 无法穷举）；或 RTIC/embassy 的资源模型不允许
+  把 `init` 产出的具体类型 move 进任务（`cargo xtask check` 失败）；或同一功能需要同一固件的第二块
+  板不同实现（单态化出现第二份代码，泛型前提破裂）。
+
 ## 4. 文档 vs 代码树：已确认的落差
 
 | # | 文档说 | 树里实际 | 后果 / 处理 |
@@ -169,7 +192,7 @@ RM0440 Table 7，由 ST 员工对 G474RB 逐字确认）。槽起点 `0x0804_000
 
 ## 5. 未决（阻塞实现，或被刻意留白待人裁定）
 
-1. **`take_sample()` 语义**：挂 ADC3 EOC 中断，还是读上一拍（确定性更好）→ 决定 `Hw` trait 与窗口判据。
+1. **`take_sample()` 语义**：挂 ADC3 EOC 中断，还是读上一拍（确定性更好）→ 决定 `RawSample3` 的有效性与窗口判据（入口仍是 `-> ()`，见 ADR-10）。
 2. **`embassy_stm32::init()` 与裸 PAC 单例的衔接**：`steal()` 还是从返回的 `Peripherals` 取。
    无实板 ⇒ 只能读 embassy 源码给结论，寄存器行为属 `UNVERIFIED`；阻塞 `1_bsp/src/pwm.rs`、`1_bsp/src/adc.rs`（均**未建**）。
 3. **`INVALID_SAMPLE_LIMIT = 8`**（`3_user/src/policy.rs`，标 `[OPEN]`）：8 × 50 µs = 400 µs 无冻结依据，

@@ -31,6 +31,19 @@
 | PRE-09 | **数字只由工具产生**：Flash/RAM/时序数字一律用 `cargo xtask size` 或实测输出回填，**禁止手写** | 文档里的数字必须能追到一条命令 |
 | PRE-10 | **契约唯一真源**：引脚只在 [`docs/hardware-requirements.md`](docs/hardware-requirements.md) §3；文件架构只在 [`docs/software-architecture.md`](docs/software-architecture.md)；硬件事实只在 [`docs/architecture.md`](docs/architecture.md) §2。其它文档只许指针，不许复制 | 改引脚时 grep 全仓只应命中一处 |
 
+## 1.1 机制铁律（MECH）
+
+> 管的是"对象放在哪、怎么分发、失败怎么表达、panic 分支从哪来"。
+> 与 PRE-01…10 并列，违反同属红线。`1_bsp`/`2_system`/`4_app` **未建**时，
+> 只对已存在的 crate 生效；未建 crate 的检查不得报成 PASS（同 §2 口径）。
+
+| # | 铁律 | 检查手段 |
+|---|---|---|
+| MECH-01 | **驱动对象不设全局 `static`**。外设在 `init` 里构造成确定已初始化的具体类型，用 move 交给任务/结构体；RTIC 的 `Local`/`Shared` 资源由框架持有，源码里不得出现 `static mut`、`static Option<驱动>`、`OnceCell`/`OnceLock` + 运行期 `take()`。跨任务只共享**最新值**（本仓 `Snapshot<T>`；若改用 `embassy_sync::watch::Watch`，须先写 ADR），绝不共享驱动对象 | `rg -n "static\s+mut|static\s+.*Option<|OnceCell|OnceLock" 1_bsp 4_app`（未建时 N/A）；除 `Snapshot`/`Watch` 外共享驱动 = review 打回 |
+| MECH-02 | **异构设备用 enum 静态分发**。设备族在编译期封闭，`enum` + `match`；禁 `dyn Trait`、禁 `Box<dyn …>`/`&dyn …` 字段。trait 只能作编译期契约，且单板至多一个实现；真需要泛型时最多一个实现参数，单板只单态化一次。不为"通用库"预留实现位 | `rg -n "dyn [A-Z]"` 在 `1_bsp`/`2_system`/`4_app` 为空；`cargo xtask size` 的 `.rodata` 不因 vtable 增长 |
+| MECH-03 | **热路径返回 `()`，校验收口在构造点**。`start`/`step`/`set_duty`/`take_sample` 等每拍入口不返回 `Option`/`Result`；合法性由类型保证（`Duty` 已夹限、`RawSample3` 已满 3 路）。`try_new() -> Result<_, _>` 只在 `init`/命令层调一次。算法层的"可解性/查询"（如 `GainGate::pred_pp() -> Option<f32>`）不在此限——那是值的语义，不是外设状态 | `rg -n "fn (start|step|set_duty|take_sample)\([^)]*\)\s*->\s*(Option|Result)"`（未建时 N/A）；构造点之外的 `is_within_limits`/范围校验 = review 打回 |
+| MECH-04 | **热路径零隐式 panic**。禁 `arr[i]`、`unwrap`/`expect`、切片与 `assert!`（`debug_assert!` 也不得进热路径）。用 `iter().zip()`、定长数组、`get()` + 计数。索引/解包的 panic 分支会拉入 `core::panicking`，带消息格式化时连 `core::fmt`；是否真的变大由 `cargo xtask size` 和 `llvm-nm` 判定，不靠估计 | crate 根 `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]`；`cargo xtask clippy`；release ELF 里 `core::fmt` 相关符号必须能解释 |
+
 ## 2. 门禁命令（唯一入口 `cargo xtask`）
 
 **现在可用（2026-11-16 实测全 PASS）**：
