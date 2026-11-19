@@ -27,9 +27,12 @@
 # example's auto-generated one). embassy-stm32's `memory-x` feature is
 # deliberately NOT enabled: stm32-metapac 15.0.0 gets the G4 SRAM wrong
 # (32K for stm32g491re, 96K for stm32g474rb/re; both understate the part),
-# so the generator is not authoritative. G474RBT6 as built: FLASH 128K @
-# 0x08000000; SRAM1 80K + SRAM2 32K contiguous at 0x20000000 (112K);
-# CCM 16K @ 0x10000000 (no DMA access). See memory.x for the full note.
+# so the generator is not authoritative. G474RBT6 as linked: FLASH 64K @
+# 0x08000000 (bank 1 only, DBANK=1; bank 2 declared as FLASH_BANK2 and left
+# unwritten this season); RAM 96K @ 0x20000000 (SRAM1 80K + SRAM2 16K,
+# conservative); CCMRAM 32K @ 0x10000000 (no DMA access). These are
+# conservative subsets pending a first-hand DS12288/RM0440 read. See
+# memory.x for the full note.
 # Do NOT re-enable `memory-x` alongside this file; the linker would see
 # two memory.x files.
 

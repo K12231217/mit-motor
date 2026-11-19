@@ -35,11 +35,11 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/events.rs         #   Event / Cmd 枚举 + 各队列容量常量
   src/faults.rs         #   FaultCode + 32 bit 状态字位定义
   src/icd.rs            #   TraceFrame / CanFrame 的 repr(C) 布局 + 编译期 size 断言
-  src/traits.rs         #   Hw / Clock / LogSink / Persist（跨层抽象）
-  src/limits.rs         #   D_MAX、窗口下限、电流阈值 —— 全工程唯一数值来源
+  src/limits/hw.rs      #   器件事实与电气硬约束（D_MAX、采样窗口、MT6701 位宽）
+  src/limits/budget.rs  #   系统预算（环频率、帧率、队列容量、看门狗）
 
 1_bsp/                  # 唯一 unsafe 层（包名 bsp）
-  src/lib.rs            #   Board 类型、外设单例 take、所有权表
+  src/lib.rs            #   Board 类型、init 构造后 move 移交、所有权表
   src/clock.rs          #   RCC 读回校验（embassy 配，bsp 验）
   src/gpio.rs           #   PWM/CS/STROBE/LED 的静态配置
   src/pwm.rs            #   TIM1：6 路 + BDTR 死区 + BKIN
@@ -57,12 +57,12 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/log.rs            #   try_log：无锁环，满则丢；flush 只在最低优先级
   src/time.rs           #   TIM5 @1 MHz + 64 位溢出扩展（TIM2 归 embassy 时基）
   src/queue.rs          #   事件/指令/日志队列封装（容量来自 contracts）
-  src/fsm.rs            #   状态机骨架：trait Step + 迁移表
   src/trace.rs          #   Snapshot → TraceFrame 打包（含 flags 位）
   src/watchdog.rs       #   通信中断 > 20 ms 停机
 
 3_user/                 # 纯算法（包名 user），no_std + forbid(unsafe)，x86 可测
   src/lib.rs            #   #![no_std] #![forbid(unsafe_code)]
+  src/fsm.rs            #   状态 × 事件迁移矩阵（纯函数，宿主机全表穷举）
   src/foc.rs            #   Clarke/Park 与逆变换
   src/svpwm.rs          #   七段式 + 占空比夹紧
   src/sense.rs          #   code → 安培（含零位/增益表）
@@ -173,17 +173,27 @@ pub const TRC_Q: usize = 8;
 
 每条队列配 `dropped: u16` 并进状态字；**禁止**重试循环。
 
-### 3.3 `traits.rs` —— 跨层抽象（`3_user` 只认这些）
+### 3.3 跨层接口 —— 具体类型 + enum，不做运行时分发
+
+设备族在本板是封闭的：一种桥（MP6540HA）、一种编码器（MT6701）。整机三类电机
+（RM/DM/UT）同样按 enum 分派，不写成通用库。驱动对象只有一个主人：`1_bsp::init()`
+构造，move 进 `4_app`；`3_user` 只收定长数据与具体算法类型（AGENTS §1.1 MECH-01/02）。
 
 ```rust
-pub trait Hw  { fn start(&mut self); fn take_sample(&mut self) -> Option<RawSample3>;
-                fn set_duty(&mut self, d: Duty); }
-pub trait Clock { fn now_us(&self) -> u64; fn cycles(&self) -> u32; }
-pub trait LogSink { fn try_push(&self, e: LogEntry) -> bool; }
-pub trait Persist { fn load(&self, out: &mut CalibBlob) -> bool; fn store(&self, b: &CalibBlob) -> bool; }
+/// 构造点产出确定已初始化的具体类型；热路径不查 Option。
+pub struct Board { pub pwm: Pwm, pub adc: Adc, pub can: Can }
+
+/// 多实现只在编译期封闭的枚举里切换。
+pub enum Motor { Rm(RmMotor), Dm(DmMotor), Ut(UtMotor) }
+
+impl Board {
+    pub fn start(&mut self) { /* -> () */ }
+    pub fn set_duty(&mut self, d: Duty) { /* d 已在构造点夹限 */ }
+}
 ```
 
-`3_user` 只依赖 `contracts`，用泛型接收实现（单板单实例 ⇒ 只单态化一次，零额外代码量）。
+`3_user` 只依赖 `contracts`；需要硬件时由 `4_app` 把 `&mut Board` 传进去，单板单实例，
+最多一个泛型参数，禁 trait object。`Snapshot<T>` 是跨任务唯一的最新值通道（PRE-04）。
 
 ## 4. `1_bsp`：所有权表与两处 unsafe
 
@@ -205,7 +215,8 @@ pub trait Persist { fn load(&self, out: &mut CalibBlob) -> bool; fn store(&self,
 
 - `2_system` 里**不许出现** `stm32*` / `embassy_stm32` / `embassy_executor` / `rtic*` 字样
   （`embassy-sync` 允许：它是纯 `no_std`、无芯片依赖、无分配，队列就靠它）；
-  它只从 `contracts` 取类型、从 `1_bsp` 取实现（通过泛型参数传入）。
+  它只从 `contracts` 取类型；需要硬件时由 `4_app` 以 `&mut` 传入具体实现（单板单实例，
+  最多一个泛型参数，禁 trait object）。
 - `3_user` 里**不许出现** `1_bsp`、不许 `usize` 下标越界风险（`deny(clippy::indexing_slicing)`）、不许 `unwrap`。
 - `2_system` 与 `3_user` 均 `deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)`；
   `arithmetic_side_effects` 只对整数部分启用（对 `f32` 太严）。
@@ -247,14 +258,22 @@ const _: () = assert!(size_of::<Event>() <= 32);
 
 任何字段改动都会**编译失败**——这是"给 AI 填空"最有效的一道锁。
 
-## 9. 检查手段（CI，`ci/arch_check.sh`）
+## 9. 检查手段（CI，`cargo xtask arch`）
+
+实现在 `xtask/src/checks.rs`（纯 Rust，无 shell 依赖）。
 
 1. `cargo tree -p user | grep -E "bsp|embassy-stm32|embassy-executor|rtic"` → 必须为空；
 2. `cargo tree -p system | grep -E "stm32|embassy-stm32|embassy-executor|rtic"` → 必须为空；
 3. `grep -rn "unsafe" 0_contracts/src 2_system/src 3_user/src` → 必须为空；
 4. `grep -rn "await\|defmt\|\.lock()" 4_app/src/tasks/current.rs` → 必须为空；
 5. `llvm-nm target/.../app | grep __rust_alloc` → 必须为空；
-6. `cargo build --release && llvm-objcopy -O binary`，统计 Flash/RAM 占用写进 CI 日志。
+6. `cargo build --release && llvm-objcopy -O binary`，统计 Flash/RAM 占用写进 CI 日志；
+7. I7：`MotorState` 只允许在 `0_contracts/src/fsm.rs`、`3_user/src/fsm.rs` 与两处 crate 根出现
+   （其余文件拿到它就能写第二条迁移路径）。
+
+8. **待落地**（`1_bsp`/`2_system`/`4_app` 建好后再接进 `cargo xtask arch`）：MECH-01 的
+   `static mut`/`static Option<驱动>` grep、MECH-02 的 `dyn` grep、MECH-03 的热路径签名 grep、
+   MECH-04 的 `core::fmt` 符号审查。未建 crate 的检查记为 N/A，不计 PASS。
 
 ## 10. 未定项（不影响文件架构，但影响第一行实现）
 

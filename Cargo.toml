@@ -1,0 +1,15 @@
+# 仓库根 workspace：只包含 host 侧、可单元测试的 crate。
+#
+# - `0_contracts`（包名 `contracts`）：接口事实表，零依赖。
+# - `3_user`（包名 `user`）：算法层（增益闸门/估计器），只依赖 `contracts`。
+#
+# `firmware/` 与 `xtask/` 都是**独立 workspace**，必须 exclude：firmware 是
+# thumbv7em-none-eabihf 的 no_std 应用（自己的 `[workspace]` 保证 `cargo build`
+# 永远用 firmware/.cargo/config.toml 的目标与 runner），xtask 永远是 host 工具。
+# 把任何一个并进来都会改变 `cargo xtask rel/size/flash` 的行为。
+#
+# `1_bsp` / `2_system` / `4_app` 目前不建空壳：无板、无代码，空 crate 就是死代码。
+[workspace]
+resolver = "2"
+members = ["0_contracts", "3_user"]
+exclude = ["firmware", "xtask"]

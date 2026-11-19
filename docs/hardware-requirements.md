@@ -20,7 +20,7 @@ V2 板不是为了换 MCU。换 MCU 是换料级改动；V2 板要做的是**补
 | 封装 | LQFP64 | **LQFP64** | 同封装，PCB14 可**直接换料**，不必重排信号 |
 | 引脚功能 | G491RET6 | G474RBT6 | G491 在用的 29 个信号功能**全部存在**（功能集合无丢失）|
 | Flash | 512 K | **128 K** | 少 384 K；debug 构型吃 49 %，见 §1.1 的三条对冲手段 |
-| SRAM | 112 K | **128 K**（SRAM1 80 + SRAM2 32 + CCM 16）| CCM 不可被 DMA 访问 |
+| SRAM | 112 K | **128 K**（SRAM1 80 + SRAM2 16 + CCM 32，DS12288 §3.5）| CCM 在 `0x1000_0000` 只有 CPU 可达；同一块内存在 `0x2001_8000` 有 SBUS 别名，DMA1/2 可达 |
 | 外设 | 3 ADC | 5 ADC / 7 COMP / 4 DAC / 6 OP-AMP / HRTIM / CORDIC / FMAC | §2.H 的调试设施因此可以白拿 |
 
 核对依据：CubeMX 器件库 `db/mcu/STM32G474R(B-C-E)Tx.xml`、`STM32G491R(C-E)Tx.xml` 两个器件文件
@@ -69,9 +69,11 @@ RC（256 K）/RE（512 K）与 RBT6 同封装同脚位、只差 Flash 密度：�
    若偏斜不可忽略（> 50 ns），论文表述改为"偏斜固定且可标定"，并给出补偿量与补偿后残差。
 2. **USB FS 时钟**：170 MHz 下 VCO = 340 MHz，PLLQ 只能取 /2/4/6/8（42.5/56.7），得不到 48 MHz。
    V2 用 HSI48 + CRS 供 USB；HSE 16 MHz 只服务 CAN FD 位定时。这是时钟树的前提，不是优化项。
-3. **RAM 的分块**：128 K 总量里 CCM 16 K 不可被 DMA 访问，ADC/SPI/USB 缓冲必须放 SRAM1/SRAM2，
-   黑匣子（HR-814）放在 SRAM2；`stm32-metapac` 对 G4 SRAM 的数字是错的（`g474rb/re` 给 96 K），
-   所以 `memory.x` 必须手写（已做）。
+3. **RAM 的分块**：128 K 总量 = SRAM1 80 K + SRAM2 16 K + CCM 32 K（DS12288 §3.5）。CCM 在
+   `0x1000_0000` 只经 I/D-code 总线供 CPU 使用，DMA 不可达；但同一块内存在 `0x2001_8000` 有
+   SBUS 别名，DMA1/2 可达。ADC/SPI 缓冲放 SRAM1/SRAM2（零等待且无别名歧义），黑匣子（HR-814）
+   放 SRAM2；`stm32-metapac` 对 G4 SRAM 的数字是错的（`g474rb/re` 给 96 K），所以 `memory.x`
+   必须手写（已做）。
 
 ### 1.3 PCB14 缺口清单（V2 板的存在理由）
 
@@ -106,7 +108,7 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 | HR-105 | 反接与浪涌 | 反接保护 + TVS；反接 10 s 不损坏 | 反接试验 |
 | HR-106 | CAN 物理层 | TCAN1044（非隔离）+ 4 pin 锁扣连接器，**与功率输入分开**（缺口 10）| 2 Mbit/s 数据段 24 h 无误帧 |
 | HR-107 | USB | Type-C 16P，CC 各 5.1 kΩ，仅 device；DP/DM 22 Ω 串阻；**必须加 ESD 阵列**（缺口 9）| 上电枚举 + 插拔 200 次 |
-| HR-108 | 编码器接口 | 2× MT6701 共用 SPI1（SCK/MISO）+ 2 个独立 CS，4 pin 排线 ×2，MISO 上拉 | 读角 1 h 无错帧 |
+| HR-108 | 编码器接口 | 2× MT6701 共用 SPI1（SCK/MISO）+ 2 个独立 CS（**两个 CS 各 10 kΩ 上拉到 3V3**：软件片选下，复位后到 GPIO 配置完成之间 CS 浮空，两片可能同时被选通而争用 MISO，与 PWM 六路缺下拉同类问题），4 pin 排线 ×2，MISO 上拉 | 读角 1 h 无错帧 |
 | HR-109 | 相线端接 | 三相各一个 2 pin 端子（缺口 11），配合 HR-206 | 插拔 50 次接触电阻 < 5 mΩ |
 
 ### B. 电流采样链（HR-2xx，毕设核心）
@@ -231,7 +233,7 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 | HR-603 | 载流 | 5 A 连续下相线温升 < 20 K（1 oz 至少 3 mm 宽，或改 2 oz）| 5 A 10 min 红外/热电偶 |
 | HR-604 | 机械 | 尺寸/孔位由 YHorizon-JM 关节结构决定（**待图纸**），暂定 ≤ Ø45 mm、M2.5 ×4 | 与结构件试装 |
 | HR-605 | 标识 | 丝印：版本号、日期、TP/J 编号、LED 编码简表 | 目视 |
-| HR-606 | 改板余量 | 22 个空闲脚中预留 4 个焊盘（PA0、PC1、PA15、PB7）+ 1 组备用 UART | 原理图评审 |
+| HR-606 | 改板余量 | 其余空闲脚留焊盘，其中预留 3 个焊盘（PA0、PC1、PA15）+ 1 组备用 UART | 原理图评审 |
 
 ### G. 交付与记录（HR-7xx）
 
@@ -256,7 +258,7 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 | HR-805 | 注入组 / 规则组分工 | 三路电流走**注入组**（TIM1 触发、可抢占），VBUS/NTC/VREFINT 走**规则组 + DMA 慢扫** | 20 kHz 下电流点不丢，慢通道 1 ms 更新 |
 | HR-806 | ADC 模拟看门狗 | AWD1/2/3 设过流与采样越限阈值，超限直接进硬件中断（不依赖软件残差）| 注入超限电流，中断命中且动作在下一周期内 |
 | HR-807 | 硬件过采样 | 台架模式 4–16× 过采样（与 DMM 对齐）；控制环单次采样；模式可切 | 同一电流下读数稳定度 < 1 LSB |
-| HR-808 | 内部比较器 + DAC 阈值 | COMP2_INP 与 VBUS_ADC **同脚 PA3**，不需额外分压；DAC 作可调阈值 ⇒ 过压/欠压实验直接改固件数值；COMP2_OUT 引到空闲脚 **PB9** 供 LA 抓取。外部 TLV7021 保留为不依赖固件的硬保护 | 改 DAC 值即改翻转点；COMP→TIM1_BKIN 内部互连按 RM0440 §21 核对，不可用则仅作可观测 |
+| HR-808 | 内部比较器 + DAC 阈值 | COMP2_INP 与 VBUS_ADC **同脚 PA3**，不需额外分压；DAC 作可调阈值 ⇒ 过压/欠压实验直接改固件数值；COMP2_OUT 引到空闲脚 **PA2** 供 LA 抓取（`PA2` 同时是 `COMP2_INM`，本设计用内部 DAC 作阈值，不占用该输入）。外部 TLV7021 保留为不依赖固件的硬保护 | 改 DAC 值即改翻转点；COMP→TIM1_BKIN 内部互连按 RM0440 §21 核对，不可用则仅作可观测 |
 | HR-809 | PVD 掉电检测 | 3V3 跌破阈值 → 立即 EN 拉低 + 锁存状态（**不**借此保存参数，见 HR-407）| 缓慢降压，LA 抓 EN 时序 |
 | HR-810 | VREFINT 监测 | 每遥测帧带 VREFINT 原始码，固件反算 VDDA；绝对刻度按实测 VDDA 换算 | 与 DMM 比 3.3 V，误差 < 0.5 % |
 | HR-811 | ADC 自校准 | 上电执行 ADCAL（含单端偏移校准），结果进测试记录 | 三路零位差 < 3 LSB |
@@ -295,12 +297,15 @@ V2 与 PCB14 的差别集中在模拟前端（为片内 OPAMP 让路）、6 路 
 | BOOT0 | PB8 | 61 | 已接 | BOOT0 | 沿用 + 10 kΩ 下拉 + 跳线 |
 | HSE | PF0 / PF1 | 5 / 6 | 已接 | OSC_IN/OUT | 沿用（16 MHz 或 24 MHz 均可，不影响 USB）|
 | STROBE1/2/3 | PC6 / PC7 / PC8 | 38 / 39 / 40 | **网表里无网络** | TIM8_CH1/2/3、HRTIM1_CHF1/CHF2/CHE1 | 新增引出（HR-501）|
-| DAC 遥测 | PA4 / PA5 | 18 / 19 | 空闲 | DAC1_OUT1/2 | 新增 TP17/TP18（HR-803）|
+| DAC 遥测 | PA4 / PA5 | 18 / 19 | 空闲 | DAC1_OUT1/2 | 新增 TP17（HR-803），PA5 预留 |
 | COMP2_OUT | PA2 | 14 | 空闲 | COMP2_OUT | 新增 TP（HR-808）|
 | 状态 LED | PB2 | 26 | 空闲 | GPIO | 新增（HR-505）|
 | 母线分流（选装）| PA0 | 12 | 空闲 | ADC1_IN1/ADC2_IN1 | 预留（HR-210）|
 | 保持空置 | PA6、PB1 | 20 / 25 | — | OPAMP2_VOUT / OPAMP3_VOUT | 便于日后关掉 OPAMP 直接接 ADC |
 | 其他空闲 | PA15, PB11, PC12, PC13, PC14, PC15, PC1, PC2, PC3, PD2 | 51,33,54,2,3,4,9,10,11,55 | 空闲 | — | 留焊盘（HR-606）|
+
+> **§3 表核对基准**：本表已按 `docs/DS_stm32g474rb/Pinouts_and_pin_description.md` Table 12 逐脚核对
+> （AF 与 additional functions 均查），2026-11-16。**任何引脚改动必须重核该表；散文与表冲突时以本表为准。**
 
 **核对结论**：PCB14 在用的 29 个 MCU 信号（不含 NRST 与只有网络标签的 PC1），在 `STM32G474R(B-C-E)Tx.xml` 上逐脚比对无功能丢失，
 所以"换料能跑"成立；但 V2 的功能分配另有 6 处改动（模拟前端、6 路 PWM、CAN、UART、BKIN、ADC4），
@@ -355,7 +360,7 @@ EN 在 BKIN 后 ≤ 2 µs 变低；上电时 nSLEEP/EN/PWM 顺序符合 HR-404�
 | TP15 | VBUS_DIV | 与 DMM 比对换算系数 |
 | TP16 | J_SYNC 注入节点 | HR-201/504 同步实测；可由 TP17 的 DAC 直接驱动 |
 | TP17 | DAC1_OUT1（PA4）| 模拟遥测：i_a / i_q / 残差 / 标定状态 |
-| TP18 | COMP2_OUT（PB9）| 内部过压比较器输出，LA 可抓 |
+| TP18 | COMP2_OUT（PA2）| 内部过压比较器输出，LA 可抓 |
 
 注入与替身网络：`JP_GAIN_A/B/C`（三档增益，HR-204）、`JP_OFF_A/B/C`（双向偏置，HR-205）、
 `R_SHUNT_A/B/C`（10 mΩ + 旁路，HR-206）、`J_SYNC`（HR-504）。
@@ -422,7 +427,7 @@ LED 只能看粗状态，**判据一律以状态字为准**；示波器/LA 用 S
 - [ ] JP_GAIN、JP_OFF、R_SHUNT、J_SYNC 四类网络都在原理图上
 - [ ] PC6/PC7/PC8 真的接到排针（PCB14 只是"写了预留"）
 - [ ] PA4 同时引到 TP17 与 J_SYNC（跳线可断）
-- [ ] PB9(COMP2_OUT)、PB2(LED) 引出
+- [ ] PA2(COMP2_OUT)、PB2(LED) 引出
 - [ ] BKIN 延迟与 EN 顺序的固件责任已标注在原理图（HR-403）
 - [ ] nSLEEP 下拉、BOOT0 下拉 + 跳线、NRST 上拉与按键
 - [ ] 上电默认态：nSLEEP=0 / EN=0 / PWM 无输出

@@ -22,3 +22,7 @@ jobs:
       - run: cargo xtask clippy
       - run: cargo xtask rel
       - run: cargo xtask size
+      # Host workspace regression tests, then the docs and architecture invariants.
+      - run: cargo xtask test
+      - run: cargo xtask doc
+      - run: cargo xtask arch

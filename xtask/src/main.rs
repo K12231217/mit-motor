@@ -3,14 +3,16 @@
 //! Every build / check / size / flash action lives here so CLion, VS Code and
 //! CI execute the same code path. No extra tools (just, make) are required.
 //!
-//! Commands: check build rel fmt fmt-check clippy size flash rtt help
+//! Commands: check build rel fmt fmt-check clippy test doc size flash rtt arch help
+
+mod checks;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const FW: &str = "firmware";
-const ELF_REL: &str = "target/thumbv7em-none-eabihf/release/blinky";
+pub(crate) const FW: &str = "firmware";
+pub(crate) const ELF_REL: &str = "target/thumbv7em-none-eabihf/release/blinky";
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -26,10 +28,20 @@ fn main() -> ExitCode {
         // `--all-targets` pulls in the test harness, which needs std on a
         // no_std thumb target; the firmware has one bin and no lib.
         "clippy" => cargo(&["clippy", "--bins", "--", "-D", "warnings"]),
+        // 根 workspace（host crate）的回归测试，不是 firmware。
+        "test" => root_cargo(&["test", "--workspace"]),
+        // 文档门禁：根 workspace 全量 rustdoc，任何警告即失败。
+        "doc" => doc_check(),
         "size" => size(),
         // `probe-rs run` comes from firmware/.cargo/config.toml (single source).
         "flash" => cargo(&["run", "--release"]),
         "rtt" => rtt(&rest),
+        // 架构不变量（docs/software-architecture.md §9）的唯一实现在 checks.rs。
+        "arch" if rest.is_empty() => checks::run(),
+        "arch" => Err(format!(
+            "`arch` takes no arguments (got {})",
+            rest.join(" ")
+        )),
         "help" | "-h" | "--help" => {
             help();
             Ok(())
@@ -62,17 +74,35 @@ usage: cargo xtask <command> [args]
   rel         cargo build --release           (the acceptance profile)
   fmt         cargo fmt --all
   fmt-check   cargo fmt --all -- --check      (CI)
-  clippy      cargo clippy --all-targets -- -D warnings
+  clippy      cargo clippy --bins -- -D warnings   (firmware)
+  test        cargo test --workspace         (root workspace, host)
+  doc         cargo doc --no-deps --workspace (RUSTDOCFLAGS=-D warnings)
   size        build --release, then print ELF sections and flash image
               against the FLASH length in firmware/memory.x
   flash       cargo run --release (probe-rs runner from .cargo/config.toml)
-  rtt         probe-rs attach --chip <chip from .cargo/config.toml> [args]"
+  rtt         probe-rs attach --chip <chip from .cargo/config.toml> [args]
+  arch        architecture invariants, pure Rust (docs/software-
+              architecture.md §9): I1 dependency direction, I2 unsafe,
+              I3 no heap; FAILs if the release ELF is missing"
     );
 }
 
 fn cargo(args: &[&str]) -> Result<(), String> {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(FW).args(args);
+    run(&mut cmd)
+}
+
+/// Runs cargo in the repo root workspace (0_contracts + 3_user), not firmware.
+fn root_cargo(args: &[&str]) -> Result<(), String> {
+    run(Command::new("cargo").args(args))
+}
+
+/// `cargo doc` 零警告：rustdoc 警告一律升级为错误。
+fn doc_check() -> Result<(), String> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(["doc", "--no-deps", "--workspace"])
+        .env("RUSTDOCFLAGS", "-D warnings");
     run(&mut cmd)
 }
 
@@ -217,7 +247,7 @@ fn chip_name() -> Result<String, String> {
     Err(format!("no `--chip <name>` in {}", path.display()))
 }
 
-fn rustc_output(args: &[&str]) -> Result<String, String> {
+pub(crate) fn rustc_output(args: &[&str]) -> Result<String, String> {
     let out = Command::new("rustc")
         .args(args)
         .output()
@@ -228,7 +258,7 @@ fn rustc_output(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-fn host_triple() -> Result<String, String> {
+pub(crate) fn host_triple() -> Result<String, String> {
     let verbose = rustc_output(&["-vV"])?;
     verbose
         .lines()
@@ -237,7 +267,7 @@ fn host_triple() -> Result<String, String> {
         .ok_or_else(|| "rustc -vV has no host line".to_string())
 }
 
-fn tool(dir: &Path, name: &str) -> Result<PathBuf, String> {
+pub(crate) fn tool(dir: &Path, name: &str) -> Result<PathBuf, String> {
     let plain = dir.join(name);
     if plain.is_file() {
         return Ok(plain);
@@ -260,7 +290,7 @@ fn group(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
