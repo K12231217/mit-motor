@@ -194,6 +194,8 @@ ASCII 分隔线，Why 注释保留** → 选后者。理由：`docs/comment-styl
 - 失效条件：出现 `5_*` 之类不在 `TIER_B_PREFIXES` 的硬件耦合目录（门禁静默漏判）；或
   `docs/software-architecture.md` §2 不再按 `<crate>/` 分块（`hygiene` H4 整体报缺块）；或
   `cargo xtask clippy` 的根 workspace 一遍被删（H2 只剩 firmware 覆盖）。
+- 现状（2026-11-21 裁定）：main 上 `cargo xtask tier` **持续红**，`firmware/` 三个文件等台架证据；
+  这是门禁在工作，不是故障。解除条件只有一条：`.scratch/handoff.md` §3 出现独占一行的 HIL 记录。
 
 ## 4. 文档 vs 代码树：已确认的落差
 

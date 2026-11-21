@@ -46,10 +46,11 @@ T-007（2026-11-21，xtask 工具 + 文档，命令原文输出摘要）：
 `hardware-requirements.md` 里所有"待实测"条目（OVP 翻转点、EN 低是否高阻、ADC 跨组偏斜）全部仍为 `OPEN`。
 本仓现有数字全部来自合成数据（host 数值实验），不是台架证据——口径见 `docs/INDEX.md` §6。
 
-Tier B 门禁（`cargo xtask tier`）在 `feat/contracts-and-gate` 上**按设计 FAIL**：`firmware/Cargo.toml`
-与 `firmware/memory.x` 相对 main 有改动，属硬件耦合路径且无台架证据。整改只有两条：改动留在
-hil-pending 分支，或补一条独立成行的台架证据记录（格式见 `docs/agent-guardrails.md` §1 的 H3）。
-不要为了让它变绿而改门禁代码。
+Tier B 门禁（`cargo xtask tier`）在 main 上**按设计 FAIL**：`firmware/Cargo.toml`、`firmware/memory.x`
+与 `firmware/src/bin/blinky.rs` 属硬件耦合路径且无台架证据（与 `feat/contracts-and-gate` 同一提交）。
+2026-11-21 裁定：**接受这颗红**，等 G474RBT6 台架证据再补记录，不为变绿改门禁。补证据只有一种形态：
+在 §3 新增独占一行、以固定标记开头的记录（格式见 `docs/agent-guardrails.md` §1 的 H3）。
+在这条记录出现前，本节的"无"就是事实，任何"已验证"表述都不成立。
 
 ## 4. 下一个可验收单元
 
