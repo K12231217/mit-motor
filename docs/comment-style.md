@@ -37,7 +37,7 @@ rustfmt 默认 `max_width = 100`、`wrap_comments = false`（`rustfmt --print-co
    反：`//! **协议**`。
 9. 行宽上限：单行 ≤ 100 显示列，CJK 记 2 列，超出即手工折行；rustfmt 与 `cargo xtask doc` 都不查宽度，
    只能按这条硬上限逐行数（`0_contracts` 与 `3_user` 当前无超宽行）。
-   正：`3_user/src/gate.rs` 的 χ² 说明拆成两行（公式与 `Σi = Si⁻¹·σ_res²` 各占一行），每行 ≤ 100 列。
+   正：`3_user/src/gate/accum.rs` 的 χ² 说明拆成两行（公式与 `Σi = Si⁻¹·σ_res²` 各占一行），每行 ≤ 100 列。
    反：把 `0_contracts/src/limits/hw.rs` 里 `D_MAX` 的三行推导并成一行（> 100 列）。
 10. 物理常量必须有单位与来源：摘要句写「<含义>，单位 <单位>。」（无量纲写「无量纲」），
     细节给 datasheet 章节、RM 条款或实测方法；没有单位的物理量不得作为常量出现。

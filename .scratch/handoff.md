@@ -13,7 +13,7 @@
 | T-003 | B | `arch_check` 去 bash 依赖：I1/I2/I3 改成 `xtask/src/checks.rs` 内的 Rust 实现，`ci/arch_check.sh` 删除 | 事实与证据见 `docs/INDEX.md` §4 落差 3 | **DONE**（`cargo xtask arch` → 3 PASS） |
 | T-004 | A | 探针：`embassy_stm32::init()` 返回的 `Peripherals` 与裸 PAC `steal()` 的衔接 | 无（探针免脚手架） | **BLOCKED**：无 G474 实板；可先在 host 读 embassy 源码给结论，寄存器行为属 `UNVERIFIED` |
 | T-005 | B | 状态 × 事件迁移矩阵（`3_user/src/fsm.rs` + 类型 `0_contracts/src/fsm.rs`）、状态字 bit 15 `cmd_reject`、清故障窗口、bank 2 标定档案双槽布局、`arch` 增 I7 | 事实与证据见 `docs/INDEX.md` §3 ADR-09、§1 SRAM/算法层行 | **DONE**（host 侧；档案写入路径与制动策略未做，见 ADR-09 失效条件） |
-| T-006 | B | 规范：驱动所有权 move 移交、enum 静态分发、热路径返回 `()`、热路径零隐式 panic；同步 `software-architecture.md` §3.3/§9 | 事实见 `docs/INDEX.md` §3 ADR-10、`AGENTS.md` §1.1 MECH-01…04 | **DONE**（纯文档，无代码可测；门禁见 §2） |
+| T-006 | B | 规范：驱动所有权 move 移交、enum 静态分发、热路径校验边界与零隐式 panic | 事实见 `docs/INDEX.md` §3 ADR-10、`AGENTS.md` §1.1 MECH-01…04 | **DONE**（纯文档；门禁见 §2） |
 | T-007 | B | 协作协议落地：H1–H5 硬门禁（`hygiene` / `tier` / clippy 双 workspace）、S1–S3 软协议、`docs/agent-guardrails.md` | 无业务代码；决策见 `docs/INDEX.md` §3 ADR-11 | **DONE**（host 侧；`tier` 对 Tier B 按设计 FAIL） |
 | T-008 | B | 可脱离实板的信号链：`foc` / `svpwm` / `sense` / `pid`（移植 Apache-2.0 上游） | 无契约变更；来源与改动见 `docs/INDEX.md` §3 ADR-12、`docs/reference-implementations.md` §8 | **DONE**（host 侧；`calib`/`safety` 并入 `gate`，不另建） |
 

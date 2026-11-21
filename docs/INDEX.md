@@ -23,8 +23,8 @@
 | 运行时 | RTIC 2.4 + `embassy-stm32` 0.1.0（`stm32g474rb`）混合；**单 bin `blinky` 模板，无电机代码** | `firmware/Cargo.toml` |
 | 镜像基线 | release 镜像 **17,768 B / 27.1 %**（Flash 区 65,536 B = 64 KiB）；`.text` 14,632 / `.rodata` 2,552 / `.data` 112 / `.bss` 480 | `cargo xtask size`，2026-11-16 实测 |
 | 门禁基线 | `test` / `check` / `fmt-check` / `clippy`（firmware + 根 workspace）/ `rel` / `size` / `arch`（= I1/I2/I3/I7）/ `hygiene`（H2/H4/H5）全 PASS；`tier`（H3）按基线分支判定，Tier B 无 HIL 即 FAIL（均为 `cargo xtask <cmd>`；数字以各命令输出为准） | 2026-11-21 实测 |
-| 门控定版 | 四维结构门 `R ≥ 0.995`、`d ≥ 0.01`、`z ≤ 0.02`、`pred ≤ 0.9·0.5 pp`；`χ²(2) ≤ 9.21` **只在结构门之后**算；`z=\|A0\|·√3/√(G·A1)`、`G=200`、`λ=1−1/2000`、`N_eq ≤ 3999` | 实现 `3_user/src/gate.rs`（`GateParams`/`GainAccum`/`GainGate`）；数值唯一来源：器件/电气在 `0_contracts/src/limits/hw.rs`、时序容量在 `limits/budget.rs`、策略阈值在 `3_user/src/policy.rs`（三者已分离，`limits/mod.rs` 汇总；两处不许互抄数值）。已数值否定、禁止复活（离线实验，脚本未入仓）：`d` 当跨工况阈值（实测反序，见 AGENTS §4-8）、`λ_min ≥ 135` 这类常数（应现算）、TLS（低幅区本应被门控拒） |
-| 算法层内容 | `3_user/src/`：`gate.rs`（四维门 + χ²，阈值/公式见「门控定版」）、`encoder.rs`（MT6701 帧解析、四方接受判据、丢失拍数放宽、两帧去抖）、`fsm.rs`（状态 × 事件迁移矩阵，纯 `const fn`，按 `state × event × record_valid` 全表穷举；类型在 `contracts/src/fsm.rs`）、`policy.rs`（策略参数：门限/降额/盲推窗口/SPI 分频/清故障窗口，只引用 `contracts::limits` 派生）；两个 crate 无 `todo!()`，测试条数以 `cargo xtask test` 为准 | `ls 3_user/src`；`grep -rn 'todo!' 0_contracts/src 3_user/src` 为空 |
+| 门控定版 | 四维结构门 `R ≥ 0.995`、`d ≥ 0.01`、`z ≤ 0.02`、`pred ≤ 0.9·0.5 pp`；`χ²(2) ≤ 9.21` **只在结构门之后**算；`z=\|A0\|·√3/√(G·A1)`、`G=200`、`λ=1−1/2000`、`N_eq ≤ 3999`；**组窗隔离**：200 拍独立累加、组内不写主窗口，结构门 + 组内前后半窗 χ² + 跨组 χ² 全过才并入并刷新生效增益，`pred` 只决定能否发布 | 实现 `3_user/src/gate.rs`（`GateParams`/`GainGate`）与 `gate/accum.rs`（`GainAccum`、私有 `GroupWindow`/`HalfWindow`、两级 χ²）、`gate/math.rs`（无 libm 数值）；数值唯一来源：器件/电气在 `0_contracts/src/limits/hw.rs`、时序容量在 `limits/budget.rs`、策略阈值在 `3_user/src/policy.rs`（三者已分离，`limits/mod.rs` 汇总；两处不许互抄数值）。已数值否定、禁止复活（离线实验，脚本未入仓）：`d` 当跨工况阈值（实测反序，见 AGENTS §4-8）、`λ_min ≥ 135` 这类常数（应现算）、TLS（低幅区本应被门控拒） |
+| 算法层内容 | `3_user/src/`：`gate.rs` + `gate/accum.rs` + `gate/math.rs`（状态机 / 正规方程与 χ² / 无 libm 数学；阈值与公式见「门控定版」）、`encoder.rs` + `encoder/{frame,monitor}.rs`（MT6701 帧布局与 CRC / 四方接受判据、丢失拍数放宽与两帧去抖）、`fsm.rs`（状态 × 事件迁移矩阵，纯 `const fn`，按 `state × event × record_valid` 全表穷举；类型在 `contracts/src/fsm.rs`）、`policy.rs`（策略参数：门限/降额/盲推窗口/SPI 分频/清故障窗口，只引用 `contracts::limits` 派生）、`foc.rs`（Clarke/Park/逆 Park + 无 libm 正余弦）、`svpwm.rs`（几何扇区 SVPWM → 比较值）、`sense.rs`（原始码 → 安培）、`pid.rs`（条件积分抗饱和；这四个模块移植自 Apache-2.0 上游，见 ADR-12）；两个 crate 无 `todo!()`，测试条数以 `cargo xtask test` 为准 | `ls 3_user/src/gate 3_user/src/encoder`；`grep -rn 'todo!' 0_contracts/src 3_user/src` 为空 |
 | 已拍定口径 | `D_MAX=0.80`；编码器 SPI **10.625 MHz**；故障动作 **coast**（台架不带重力负载）；**标定档案落 bank 2 双槽**（布局见 ADR-09；写入路径随 `1_bsp` 建）；**砍板载 USB**（上位机走 CAN FD） | `0_contracts/src/limits/hw.rs` 的 `D_MAX` 与 `CALIB_SLOT_*`、`3_user/src/policy.rs` 的 `ENC_SPI_HZ`；其余为 2026-11-16 用户裁定，代码落点未建（未验证） |
 | 冻结脚手架 commit | `ab1634798e56034f332ec33b1359ea1b23dc4b4e`（T-001 冻结点；仅 xtask/CI/CLion 配置，无业务代码）。T-002 已改动工作区，当前 HEAD **未复核** | `git rev-parse HEAD`（未跑） |
 | 任务书字段 | 专业 = **自动化**；任务书原文"轨道交通信号与控制"是笔误（2026-11-16 老师确认） | 2026-11-16 老师定案。**不得**据此推断答辩委员会的关注点 |
@@ -138,7 +138,7 @@ I4–I6 因缺 `4_app` 暂无检查实现。
 候选（故障表示）：位掩码 `FaultFlags`、**单码 `FaultCode`（首个故障胜出）** → 选单码。
 理由：线上故障字段只有 8 bit 且语义是"一个码"，掩码无处安放；单码还保住了"最先出事的那个"。
 候选（制动）：新增 `Duty::Brake`（下三管常通）、**暂不提供，故障与停机一律 coast** → 选后者。
-理由：`Duty` 的 `Pwm` 被 `is_within_limits` 夹在 `|m| ≤ 0.6`（`D_MAX = 0.80` 为保 ≥5 µs 低边采样窗），
+理由：`Duty` 的 `Pwm` 调制量由 `ClampedModulation` 在类型层锁在 `|m| ≤ 0.6`（`D_MAX = 0.80` 为保 ≥5 µs 低边采样窗），
 制动是 `m = -1`，必须新增第三变体并决定"待机时制动还是自由停车"的硬件策略；台架不带重力负载，
 现在没有需要制动的场景，先不做。`LoopAction` 因此只有 `Coast`/`OpenLoop`/`Current`。
 候选（标定档案）：不存（每次上电自校准）、**bank 2 内 A/B 双槽，各 2 页（4 KB）** → 选后者。
@@ -165,10 +165,10 @@ RM0440 Table 7，由 ST 员工对 G474RB 逐字确认）。槽起点 `0x0804_000
 理由：本板设备族封闭（MP6540HA + MT6701；整机 RM/DM/UT 三类），扩展点在编译期就已知；
 enum 让新增设备型变成编译错误而不是漏实现，也不为 vtable 和单态化膨胀付费。
 
-候选（失配表达）：热路径返回 `Option/Result`、**构造点 `try_new() -> Result`，热路径 `()`** → 选后者。
-理由：采样/出力入口每 50 µs 跑一次，合法性（`Duty` 夹限、`RawSample3` 三路齐全）在构造点一次验完；
-热路径再判一次只增加分支与未处理分支。纯算法查询（`GainGate::solve() -> Option`）保留 `Option`，
-那是"值是否可解"，不是"外设是否就绪"。
+校验边界以 [AGENTS.md §1.1 MECH-03](../AGENTS.md) 为准。`Duty::Pwm` 直接消费构造时已夹限的
+`ClampedModulation`。`RawSample3` 携带三路码和拍号，同拍归属与采样有效性由采集端在当拍确认。
+写入操作可返回 `()`，采样结果与算法查询按数据语义选择返回类型。`software-architecture.md` §9 的
+签名搜索用于定位评审入口，验收同时检查构造路径、输入类型和函数体。
 
 代价：跨任务只能拿到 `Snapshot<T>` 的值，拿不到驱动句柄；需要"读改写外设"的需求必须回到所有者任务。
 新增设备型必须改 enum（故意）。详见 `AGENTS.md` §1.1 MECH-01…04 与 `software-architecture.md` §3.3。
@@ -231,7 +231,7 @@ Apache-2.0）与 `okhsunrog/oxifoc`（`svpwm`/`current_sense`，Apache-2.0），
 
 ## 5. 未决（阻塞实现，或被刻意留白待人裁定）
 
-1. **`take_sample()` 语义**：挂 ADC3 EOC 中断，还是读上一拍（确定性更好）→ 决定 `RawSample3` 的有效性与窗口判据（入口仍是 `-> ()`，见 ADR-10）。
+1. **`take_sample()` 语义**：挂 ADC3 EOC 中断，还是读上一拍（确定性更好）→ 决定如何确认样本同拍、判定窗口有效性并表达缺样（见 ADR-10）。
 2. **`embassy_stm32::init()` 与裸 PAC 单例的衔接**：`steal()` 还是从返回的 `Peripherals` 取。
    无实板 ⇒ 只能读 embassy 源码给结论，寄存器行为属 `UNVERIFIED`；阻塞 `1_bsp/src/pwm.rs`、`1_bsp/src/adc.rs`（均**未建**）。
 3. **`INVALID_SAMPLE_LIMIT = 8`**（`3_user/src/policy.rs`，标 `[OPEN]`）：8 × 50 µs = 400 µs 无冻结依据，
