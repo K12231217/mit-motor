@@ -49,6 +49,22 @@ pub const LAMBDA: f32 = 0.9995;
 /// 组窗样本数 `G`：10 ms @ 20 kHz，z 门每 200 个样本重算一次。
 pub const GROUP_SAMPLES: u32 = 200;
 
+/// 组内突变检测的 σ 倍数：单拍残差门限 `|r| > K·σ_res`，组内累积残差门限
+/// `Σr² > (n + K·√(2n))·σ_res²`。
+///
+/// 依据：`σ_res²` 取上一已通过组窗的残差方差（三相零和违背）。`K = 8` 对单拍
+/// 等效 64σ²，高于三路均匀噪声叠加的最坏幅值（约 36σ²），不会把本底噪声判成突变；
+/// 25 % 相对增益阶跃在满量程样本上约 85σ，单拍即越界。累积式在 `n = 200` 时给出
+/// `360σ_res²`（均值 `200σ_res²` + 8σ 尾），2 % 阶跃（约 `4360σ_res²`）足以触发。
+pub const RESIDUAL_K_SIGMA: f32 = 8.0;
+
+/// 组内累积残差判据的最少拍数。
+///
+/// 依据：小样本的 χ² 尾部分布过重（n = 1 时 `n + K√(2n)` 只有约 12σ²，而单拍
+/// 最坏可达 36σ²），必须等样本足够多才启用累积判据。取 20 拍（1 ms）后
+/// `χ²(n)/n` 的波动已降到约 `√(2/n) ≈ 0.32`。
+pub const GROUP_SSE_MIN_SAMPLES: u32 = 20;
+
 /// 标定窗有效样本权重和 `Σw`：100 ms @ 20 kHz。
 pub const WINDOW_SAMPLES: u32 = 2_000;
 
@@ -204,6 +220,8 @@ const _: () = assert!(KAPPA < 1.0);
 const _: () = assert!(LAMBDA < 1.0);
 const _: () = assert!(CHI2_MAX > 0.0);
 const _: () = assert!(GROUP_SAMPLES > 0);
+const _: () = assert!(RESIDUAL_K_SIGMA > 0.0);
+const _: () = assert!(GROUP_SSE_MIN_SAMPLES > 0 && GROUP_SSE_MIN_SAMPLES < GROUP_SAMPLES);
 const _: () = assert!(WINDOW_SAMPLES > GROUP_SAMPLES);
 const _: () = assert!(N_EQ_MAX >= WINDOW_SAMPLES);
 const _: () = assert!(ENC_MECH_RPM_MAX > 0.0);

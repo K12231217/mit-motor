@@ -250,15 +250,16 @@ fn check_no_heap() -> Outcome {
     }
 }
 
-/// I7 —— 状态迁移只有一处：`MotorState` 只允许在 `fsm.rs` 与 crate 根出现。
+/// I7 —— 状态迁移只有一处：`MotorState` 只允许在 `fsm.rs`、其测试模块与 crate 根出现。
 ///
 /// 判据是"命名"而不是"语义"：只要别处拿到 `MotorState`，就能写出第二条迁移路径。
 /// 一条 grep 挡不住逻辑错误，但能挡住"在 CAN 任务里顺手改一下状态"这种最贵的退化。
 fn check_fsm_single_owner() -> Outcome {
-    const ALLOWED: [&str; 4] = [
+    const ALLOWED: [&str; 5] = [
         "0_contracts/src/fsm.rs",
         "0_contracts/src/lib.rs",
         "3_user/src/fsm.rs",
+        "3_user/src/fsm/tests.rs",
         "3_user/src/lib.rs",
     ];
     const NEEDLE: &str = "MotorState";
@@ -302,7 +303,7 @@ fn check_fsm_single_owner() -> Outcome {
 
     if hits.is_empty() {
         Outcome::Pass(format!(
-            "{NEEDLE} 仅在 fsm.rs 与 crate 根出现（扫描 {} 个文件）",
+            "{NEEDLE} 仅在 fsm.rs、其测试模块与 crate 根出现（扫描 {} 个文件）",
             scanned
         ))
     } else {

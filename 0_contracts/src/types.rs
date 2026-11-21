@@ -43,7 +43,7 @@ impl Q15 {
     /// `NaN → ZERO`（`NaN` 没有可表示的定点值，按"无指令"处理）。
     ///
     /// 饱和边界是定点类型自身的 `[-1.0, 32767/32768]`，不是 [`MODULATION_MAX`]：
-    /// 超限指令必须原样落到这里，[`Duty::is_within_limits`] 才能事后判为超限；若在这里
+    /// 超限指令必须原样落到这里，[`ClampedModulation::try_new`] 才能事后判为超限；若在这里
     /// 按 `D_MAX` 悄悄夹紧，判据会永远为真，算法错误就变成静默饱和。
     ///
     /// `+1.0` 对应 `32768`，超出 `i16`，因此正饱和值是 [`Self::MAX`]（`32767`）；
@@ -77,15 +77,64 @@ pub const MODULATION_MAX: f32 = 2.0 * limits::hw::D_MAX - 1.0;
 
 /// [`MODULATION_MAX`] 的定点表示（四舍五入到最近的码），派生值，不引入新门限。
 ///
-/// `D_MAX = 0.80 ⇒ m = 0.6 ⇒ 0.6 × 32768 = 19660.8 → 19661`。它同时是
-/// [`Duty::is_within_limits`] 的量化边界：`Q15::from_ratio(MODULATION_MAX)` 恰好落在
+/// `D_MAX = 0.80 ⇒ m = 0.6 ⇒ 0.6 × 32768 = 19660.8 → 19661`。它是
+/// [`ClampedModulation`] 的量化边界：`Q15::from_ratio(MODULATION_MAX)` 恰好落在
 /// 这一码上，所以"恰好等于 `D_MAX`"不会因为最后一个 LSB 的舍入被判超限，再大一个码
 /// 就算超限。
 pub const MODULATION_MAX_RAW: i16 = (MODULATION_MAX * Q15_FULL_SCALE + 0.5) as i16;
 
+/// 保证满足 `|raw| <= MODULATION_MAX_RAW` 的合法调制量。
+///
+/// 字段私有：模块外无法绕过检查拼出一个越界的调制量。取值为 Q1.15 的 `m = 2d - 1`，
+/// 因此 `D_MAX` 约束在类型层面成立，而不是靠调用方记得事后调用判据（PRE-08）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct ClampedModulation(Q15);
+
+impl ClampedModulation {
+    /// 零调制量（三路 50 %）。
+    pub const ZERO: Self = Self(Q15::ZERO);
+
+    /// 受检构造：超限直接返回 `Err`，由边界入口决定进 Fault 还是饱和。
+    ///
+    /// 返回原始 `Q15` 而不是丢值，便于调用方把拒绝的码写进遥测。
+    pub const fn try_new(q: Q15) -> Result<Self, Q15> {
+        let raw = q.raw();
+        let limit = MODULATION_MAX_RAW;
+        if raw >= -limit && raw <= limit {
+            Ok(Self(q))
+        } else {
+            Err(q)
+        }
+    }
+
+    /// 显式饱和构造：夹紧到 `[-MODULATION_MAX_RAW, +MODULATION_MAX_RAW]`。
+    ///
+    /// 只给"算法给出小幅越界、策略就是饱和"的入口用；需要区分故障时用
+    /// [`Self::try_new`]。
+    pub const fn new_clamped(q: Q15) -> Self {
+        let max = MODULATION_MAX_RAW;
+        let raw = q.raw();
+        let clamped = if raw > max {
+            max
+        } else if raw < -max {
+            -max
+        } else {
+            raw
+        };
+        Self(Q15::from_raw(clamped))
+    }
+
+    /// 纯取值：把调制量交回定点域。
+    pub const fn get(self) -> Q15 {
+        self.0
+    }
+}
+
 /// 三相输出指令。
 ///
 /// - `Pwm`：每相存调制量 `m = 2d - 1`（Q1.15），`m = 0` 是该相 50 % 占空比。
+///   字段是 [`ClampedModulation`]，越界占空比在构造处就无法表达。
 /// - `Coast`：六路栅极全低。MP6540HA 没有 EN 引脚，六路全低即三相 Hi-Z，与
 ///   `m = 0`（每相 50 %，三相同电位）不是同一件事，不允许用零调制量冒充。
 ///
@@ -94,8 +143,12 @@ pub const MODULATION_MAX_RAW: i16 = (MODULATION_MAX * Q15_FULL_SCALE + 0.5) as i
 pub enum Duty {
     /// 六路全低 = Hi-Z（安全态）。
     Coast,
-    /// 三相调制量（Q1.15）。
-    Pwm { a: Q15, b: Q15, c: Q15 },
+    /// 三相调制量：类型系统保证均满足 `D_MAX` 低边采样窗口约束。
+    Pwm {
+        a: ClampedModulation,
+        b: ClampedModulation,
+        c: ClampedModulation,
+    },
 }
 
 impl Duty {
@@ -107,23 +160,9 @@ impl Duty {
     /// 纯构造：零调制量（三路 50 %）。不是 `Coast`。
     pub const fn zero_modulation() -> Self {
         Self::Pwm {
-            a: Q15::ZERO,
-            b: Q15::ZERO,
-            c: Q15::ZERO,
-        }
-    }
-
-    /// 是否落在 `|m| ≤ MODULATION_MAX` 内。`Coast` 恒为合法（不携带调制量）。
-    ///
-    /// 判据在定点域做：比较 `raw` 与 [`MODULATION_MAX_RAW`]，与该门限的量化边界一致。
-    /// 若在 `f32` 域比较，`Q15::from_ratio(MODULATION_MAX)` 舍入后的零头会让"恰好等于
-    /// `D_MAX`"误判为超限。
-    pub fn is_within_limits(&self) -> bool {
-        match *self {
-            Self::Coast => true,
-            Self::Pwm { a, b, c } => [a, b, c]
-                .iter()
-                .all(|m| m.raw().unsigned_abs() <= MODULATION_MAX_RAW.unsigned_abs()),
+            a: ClampedModulation::ZERO,
+            b: ClampedModulation::ZERO,
+            c: ClampedModulation::ZERO,
         }
     }
 }
@@ -131,9 +170,14 @@ impl Duty {
 /// 一拍三相 ADC 原始码（12 bit 右对齐，未减零位、未乘增益）。
 ///
 /// 字段名带 `_code` / `_us`，这里绝不出现安培（PRE-06）。
+///
+/// `tick` 是 PWM 周期单调递增的拍号。三路 ADC 注入组必须由同一拍触发，任意一路的
+/// `tick` 与当前控制拍不一致即视为跨拍拼凑，调用方不得把它当同一拍样本使用。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct RawSample3 {
+    /// PWM 周期单调递增拍号（用于校验三路 ADC 注入组同步归属同一拍，以及监督看门狗）。
+    pub tick: u32,
     /// 采样时刻（TIM5，1 µs）。
     pub t_us: u32,
     /// 三路原始码，顺序固定 A/B/C。
@@ -269,9 +313,11 @@ impl CalibStep {
 
 // 尺寸变化必须显式暴露：这些类型会进 SRAM 快照与队列。
 const _: () = assert!(core::mem::size_of::<Q15>() == 2);
-const _: () = assert!(core::mem::size_of::<RawSample3>() == 12);
-const _: () = assert!(core::mem::offset_of!(RawSample3, t_us) == 0);
-const _: () = assert!(core::mem::offset_of!(RawSample3, code) == 4);
+const _: () = assert!(core::mem::size_of::<ClampedModulation>() == 2);
+const _: () = assert!(core::mem::size_of::<RawSample3>() == 16);
+const _: () = assert!(core::mem::offset_of!(RawSample3, tick) == 0);
+const _: () = assert!(core::mem::offset_of!(RawSample3, t_us) == 4);
+const _: () = assert!(core::mem::offset_of!(RawSample3, code) == 8);
 const _: () = assert!(core::mem::size_of::<PhaseCurrent>() == 12);
 const _: () = assert!(core::mem::size_of::<DqTarget>() == 8);
 const _: () = assert!(core::mem::offset_of!(DqTarget, d_amps) == 0);
@@ -318,41 +364,60 @@ mod tests {
         }
     }
 
-    /// 边界：恰好 `D_MAX`（量化码 19661）合法，任一方向多一个 LSB 即超限。
+    /// 边界：恰好 `D_MAX`（量化码 19661）合法，任一方向多一个 LSB 即构造失败。
     #[test]
-    fn duty_limit_boundary_matches_d_max() {
+    fn clamped_modulation_boundary_matches_d_max() {
         // 0.6 × 32768 = 19660.8 → 四舍五入 19661。
         assert_eq!(MODULATION_MAX_RAW, 19_661);
-        assert_eq!(Q15::from_ratio(MODULATION_MAX).raw(), MODULATION_MAX_RAW);
+        let max = Q15::from_ratio(MODULATION_MAX);
+        assert_eq!(max.raw(), MODULATION_MAX_RAW);
+        assert_eq!(
+            ClampedModulation::try_new(max),
+            Ok(ClampedModulation::new_clamped(max))
+        );
 
-        let make = |m: i16| Duty::Pwm {
-            a: Q15::from_raw(m),
-            b: Q15::ZERO,
-            c: Q15::ZERO,
-        };
-        assert!(make(MODULATION_MAX_RAW).is_within_limits());
-        assert!(make(-MODULATION_MAX_RAW).is_within_limits());
-        assert!(!make(MODULATION_MAX_RAW + 1).is_within_limits());
-        assert!(!make(-MODULATION_MAX_RAW - 1).is_within_limits());
-        assert!(!make(i16::MIN).is_within_limits());
-        assert!(!make(i16::MAX).is_within_limits());
+        for raw in [0, 1, -1, MODULATION_MAX_RAW, -MODULATION_MAX_RAW] {
+            let q = Q15::from_raw(raw);
+            assert!(ClampedModulation::try_new(q).is_ok(), "raw = {raw}");
+        }
+        for raw in [
+            MODULATION_MAX_RAW + 1,
+            -MODULATION_MAX_RAW - 1,
+            i16::MIN,
+            i16::MAX,
+        ] {
+            let q = Q15::from_raw(raw);
+            assert_eq!(ClampedModulation::try_new(q), Err(q), "raw = {raw}");
+        }
     }
 
+    /// 显式饱和只夹到 `D_MAX`，不夹到定点满量程。
     #[test]
-    fn duty_limit_checks_every_phase() {
-        let pwm = Duty::Pwm {
-            a: Q15::ZERO,
-            b: Q15::from_raw(MODULATION_MAX_RAW + 1),
-            c: Q15::ZERO,
-        };
-        assert!(!pwm.is_within_limits());
-        let pwm = Duty::Pwm {
-            a: Q15::ZERO,
-            b: Q15::ZERO,
-            c: Q15::from_raw(-MODULATION_MAX_RAW - 1),
-        };
-        assert!(!pwm.is_within_limits());
-        assert!(Duty::Coast.is_within_limits());
+    fn clamped_modulation_saturates_at_d_max() {
+        let saturated = ClampedModulation::new_clamped(Q15::from_raw(i16::MAX));
+        assert_eq!(saturated.get().raw(), MODULATION_MAX_RAW);
+        let saturated = ClampedModulation::new_clamped(Q15::from_raw(i16::MIN));
+        assert_eq!(saturated.get().raw(), -MODULATION_MAX_RAW);
+        assert_eq!(
+            ClampedModulation::new_clamped(Q15::from_raw(123))
+                .get()
+                .raw(),
+            123
+        );
+    }
+
+    /// `Coast` 与零调制量语义不同，但都不携带越界码。
+    #[test]
+    fn duty_coast_stays_distinct_from_zero_modulation() {
+        assert_ne!(Duty::Coast, Duty::zero_modulation());
+        match Duty::zero_modulation() {
+            Duty::Pwm { a, b, c } => {
+                assert_eq!(a.get(), Q15::ZERO);
+                assert_eq!(b.get(), Q15::ZERO);
+                assert_eq!(c.get(), Q15::ZERO);
+            }
+            Duty::Coast => panic!("zero_modulation 不得为 Coast"),
+        }
     }
 
     /// 从 C0 走到 C6 必须恰好七步、编号连续，且 C6 之后与越界输入都是 None。

@@ -39,7 +39,9 @@ pub use crate::fsm::{LoopAction, MotorState, Reject, SysEvent};
 pub use crate::icd::{CmdFrame, DecodeError, FbFrame, SlowFrame, ICD_VERSION};
 pub use crate::snapshot::{CmdSnapshot, CmdView, FastSnapshot, FastView, GainSnapshot, GainView};
 pub use crate::trust::Trust;
-pub use crate::types::{CalibStep, DqTarget, Duty, Mode, PhaseCurrent, RawSample3, Q15};
+pub use crate::types::{
+    CalibStep, ClampedModulation, DqTarget, Duty, Mode, PhaseCurrent, RawSample3, Q15,
+};
 
 #[cfg(test)]
 extern crate std;
@@ -55,10 +57,10 @@ mod tests {
     #[test]
     fn duty_coast_is_six_low_not_zero_modulation() {
         // 结论：MP6540HA 六路全低 = Hi-Z；Duty::Coast ≠ Duty::zero_modulation()。
+        // 超限占空比在类型层不可构造（Duty::Pwm 字段是 ClampedModulation），
+        // 因此这里不再有运行期 is_within_limits 判据。
         assert_ne!(Duty::coast(), Duty::zero_modulation());
         assert!(matches!(Duty::coast(), Duty::Coast));
-        assert!(Duty::coast().is_within_limits());
-        assert!(Duty::zero_modulation().is_within_limits());
     }
 
     #[test]

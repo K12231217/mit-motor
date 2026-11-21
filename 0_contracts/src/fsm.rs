@@ -41,6 +41,12 @@ pub enum MotorState {
 ///
 /// 只选"哪一类输出"，不携带数值：`dq` 目标来自 [`crate::snapshot::CmdView`]，电压矢量角来自
 /// 标定与台架各自的斜坡发生器。把数值塞进本枚举会造出第二份目标真源。
+///
+/// # 标定步骤不变量
+///
+/// `Calibrating(C0Zero)` 与 `Calibrating(C6Freeze)` 必须配 [`Self::Coast`]：C0 要测零位、
+/// C6 已冻结，两处开波都会污染零位或破坏冻结结果。C1–C5 才允许 [`Self::OpenLoop`]。
+/// 映射由 `user::fsm` 的 `calib_step_action` 单点实现，调用方不得自行用 `match` 决定。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoopAction {
     /// 六路输入全低，高阻。
