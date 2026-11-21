@@ -33,6 +33,35 @@ pub const D_MAX: f32 = 0.80;
 /// 同时触发与走线等长保证；实测值进遥测（HR-201/HR-202）。
 pub const ADC_PAIR_SKEW_MAX_NS: u16 = 50;
 
+/// ADC 参考电压，单位 V（VREF+ 接 3V3 轨，TL431 的 2.5 V 只喂比较器）。
+pub const VREF_V: f32 = 3.3;
+
+/// 12 bit ADC 的满量程码数（`2^12`）。
+pub const ADC_FULL_SCALE_CODE: f32 = 4_096.0;
+
+/// 12 bit ADC 的标称中点码（`VREF/2`）。
+///
+/// C0 实测零位后由标定档案覆盖；这里是未标定时唯一可用的复位值。
+pub const ADC_MIDSCALE_CODE: f32 = 2_048.0;
+
+/// `SOx` 的电流传输比，单位 安培⁻¹（典型 1/9200，范围 1/10500…1/7800）。
+///
+/// 依据：MP6540HGU-A-Z 数据手册；`architecture.md` §2.2 记录了料号与引脚事实。
+pub const SOX_RATIO_PER_AMP: f32 = 1.0 / 9_200.0;
+
+/// `SOx` 节点的戴维南等效负载，单位 Ω。
+///
+/// 4.99 kΩ/4.99 kΩ 分压偏置的并联值（HR-203），静态偏置 `VREF/2`。
+pub const SOX_LOAD_OHMS: f32 = 2_495.0;
+
+/// 电流采样标度，单位 V/A：`SOX_RATIO_PER_AMP × SOX_LOAD_OHMS ≈ 0.2712`。
+pub const SOX_VOLTS_PER_AMP: f32 = SOX_RATIO_PER_AMP * SOX_LOAD_OHMS;
+
+/// 每 LSB 对应的相电流，单位 A/LSB：`VREF_V / ADC_FULL_SCALE_CODE / SOX_VOLTS_PER_AMP`。
+///
+/// 数值约 2.97 mA/LSB（HR-203）。工作区按 ±5 A 设计，±6.08 A 只是电气满量程。
+pub const SOX_AMPS_PER_LSB: f32 = VREF_V / ADC_FULL_SCALE_CODE / SOX_VOLTS_PER_AMP;
+
 /// 帧长，单位 bit（24）。
 ///
 /// MT6701 数据手册：24 bit 绝对角输出帧 = 14 bit 角度 + 4 bit 状态 + 6 bit CRC。
@@ -92,6 +121,12 @@ pub const CALIB_SLOT_B_BASE: u32 = FLASH_BANK2_BASE + CALIB_SLOT_BYTES;
 const _: () = assert!(D_MAX > 0.0);
 const _: () = assert!(D_MAX < 1.0);
 const _: () = assert!(ADC_PAIR_SKEW_MAX_NS > 0);
+
+// 采样标度钉在 HR-203 的两个特征值上（0.2712 V/A、2.97 mA/LSB），留 ±1 % 容差：
+// 改分压或改参考电压必须同时改这里，否则编译失败。
+const _: () = assert!(SOX_VOLTS_PER_AMP > 0.268 && SOX_VOLTS_PER_AMP < 0.274);
+const _: () = assert!(SOX_AMPS_PER_LSB > 0.002_94 && SOX_AMPS_PER_LSB < 0.003_00);
+const _: () = assert!(ADC_MIDSCALE_CODE * 2.0 == ADC_FULL_SCALE_CODE);
 
 // `D_MAX` 的千分位镜像：const 上下文里 f32 不能转整数，一致性检查必须走整数算术
 // （避免 f32 抽奖）。

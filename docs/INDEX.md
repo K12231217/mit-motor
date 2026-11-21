@@ -197,6 +197,22 @@ ASCII 分隔线，Why 注释保留** → 选后者。理由：`docs/comment-styl
 - 现状（2026-11-21 裁定）：main 上 `cargo xtask tier` **持续红**，`firmware/` 三个文件等台架证据；
   这是门禁在工作，不是故障。解除条件只有一条：`.scratch/handoff.md` §3 出现独占一行的 HIL 记录。
 
+### ADR-12 信号链 = 移植 Apache-2.0 实现，不自己推公式（已定，2026-11-21）
+
+候选：按教科书自己写 Clarke/Park/SVPWM/PI；**移植 `calebfletcher/foc`（`park_clarke`/`pid`/`pwm`，
+Apache-2.0）与 `okhsunrog/oxifoc`（`svpwm`/`current_sense`，Apache-2.0），正余弦移植 `micromath`
+（MIT OR Apache-2.0）** → 选后者。
+理由：这四项是标准件，手写只会引入符号与扇区错误（本次移植时就抓到一处 S6 通道顺序抄错，
+由上游的"占空比还原矢量"测试当场打回）；上游已在 STM32 FOC 上跑通，许可证允许修改与再分发。
+本地改动只有三类：定点 `I16F16` → `f32`、量纲后缀、PID 的输出限幅与条件积分（源码无抗饱和）。
+候选（`calib`/`safety` 是否独立成模块）：**不建**——相对增益与可信性判据已在 `gate.rs`，
+再建一层就是第二条判据路径（PRE-04/I7 的同类风险）。
+代价：`3_user` 继承上游的算法约定（SVPWM 的 `1.5·v/vbus` 归一化、PI 的增益单位），换实现要同步改
+`4_app` 的调用点；`micromath` 的 0.002 rad 误差进入 Park 变换。
+- 失效条件：上游改为 copyleft 许可（当前 Apache-2.0/MIT）；或 `3_user` 为三角/开方引入
+  `libm`/`cordic` 依赖（ADR-06 的零依赖前提）；或实板发现 SVPWM 输出不满足低边采样窗口
+  （需回到 `D_MAX` 夹紧点，见 `software-architecture.md` §2 的 `pid.rs`/`svpwm.rs` 注释）。
+
 ## 4. 文档 vs 代码树：已确认的落差
 
 | # | 文档说 | 树里实际 | 后果 / 处理 |
@@ -211,6 +227,7 @@ ASCII 分隔线，Why 注释保留** → 选后者。理由：`docs/comment-styl
 | 8 | HR-305 写占空比上限 `d ≤ 90 %` | `0_contracts/src/limits/hw.rs` 的 `D_MAX = 0.80` | 已裁：0.90 在 50 µs 周期下只剩 2.5 µs 共导窗口，低于 HR-305 自己要求的 3 µs；以 `hw.rs` 为准，HR-305 待改 |
 | 9 | HR-304 要求 USB 时钟 HSI48+CRS | 板载 USB 已砍（§1 已拍定口径），固件无 USB 路径 | 此处无代码可查（`firmware/` 仍是 `blinky` 模板）；HR-304 待标废弃或删 |
 | 10 | `architecture.md` §2.3 说三路 SOx"无采样时刻偏斜" | 跨 dual 对（ADC1/2 ↔ ADC3/4）无硬件同步通路；固定偏斜按 ≤ 50 ns 补偿（`limits/hw.rs` 的 `ADC_PAIR_SKEW_MAX_NS`） | "跨组零偏斜"已证伪（§6 映射 2）；`architecture.md` §2.3 待改 |
+| 11 | `architecture.md` §2.2 写 R7/R8 = 2 kΩ/2 kΩ → 7.4 mA/LSB | HR-203 与 `hw.rs` 用 4.99 kΩ/4.99 kΩ → 0.2712 V/A、2.97 mA/LSB；`gate` 测试也按 2.97 构造数据 | 以 HR-203 与 `hw.rs`（`SOX_AMPS_PER_LSB` 由此派生）为准；§2.2 待改，改前不得引用其标度 |
 
 ## 5. 未决（阻塞实现，或被刻意留白待人裁定）
 
@@ -236,4 +253,5 @@ ASCII 分隔线，Why 注释保留** → 选后者。理由：`docs/comment-styl
 > `0_contracts/src/limits/{hw,budget}.rs` 与 `3_user/src/policy.rs` 已落地（`limits/mod.rs` 汇总），可直接 `ls` 核对。
 
 > **诚实边界**：本仓现有数字全部来自**合成数据**（host 数值实验），不是实验台架数据。任务书要求
-> "以实验数据说明精度、收敛性与安全性" ⇒ **证据缺口在台架，不在代码**；采集顺序见 `.scratch/handoff.md` §4。
+> "以实验数据说明精度、收敛性与安全性" ⇒ **证据缺口在台架**。但代码缺口不止台架：`1_bsp`/`2_system`/`4_app`
+> 仍是空目录，ADR-12 只补齐了能脱离实板的信号链（`foc`/`svpwm`/`sense`/`pid`）。采集顺序见 `.scratch/handoff.md` §4。

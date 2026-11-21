@@ -8,6 +8,10 @@
 //!   去抖。`1_bsp` 只搬字节，判据是纯函数与纯状态机，host 可测。
 //! - [`fsm`]：状态 × 事件迁移矩阵。纯函数、无时钟；调用方只许调用 [`step`]，不许自己
 //!   判断"能不能切"。未标定闭环、运行中切标定、无窗口清故障都在这里被拒。
+//! - [`foc`]：Clarke / Park 与逆变换，以及无 libm 的正余弦。幅值不变约定。
+//! - [`svpwm`]：αβ 调制量 → 三相占空比（几何扇区 + 中心对齐），移植自 oxifoc。
+//! - [`sense`]：12 bit 原始码 → 安培，零位与相对增益来自标定档案。
+//! - [`pid`]：电流环 PI，条件积分抗饱和，周期在构造时固定。
 //!
 //! 状态都在 `GainGate` 与 `EncoderMonitor` 里，无堆、`forbid(unsafe_code)`，禁止
 //! `unwrap` / `expect` / 数组下标（见下方属性）。`no_std` 只在非测试构建启用：单测跑
@@ -27,14 +31,22 @@
 )]
 
 pub mod encoder;
+pub mod foc;
 pub mod fsm;
 pub mod gate;
+pub mod pid;
 pub mod policy;
+pub mod sense;
+pub mod svpwm;
 
 pub use crate::encoder::{
     angle_rad, jump_limit_lsb, parse, AngleOutcome, EncoderMonitor, EncoderParams, Fault, Frame,
     FrameError, Health,
 };
+pub use crate::foc::{AlphaBeta, AlphaBetaVolts, Dq};
 pub use crate::fsm::step;
 pub use crate::gate::{GainAccum, GainGate, GateParams};
+pub use crate::pid::Pi;
+pub use crate::sense::SenseParams;
+pub use crate::svpwm::Sector;
 pub use contracts::Trust;

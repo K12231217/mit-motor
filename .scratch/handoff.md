@@ -15,6 +15,7 @@
 | T-005 | B | 状态 × 事件迁移矩阵（`3_user/src/fsm.rs` + 类型 `0_contracts/src/fsm.rs`）、状态字 bit 15 `cmd_reject`、清故障窗口、bank 2 标定档案双槽布局、`arch` 增 I7 | 事实与证据见 `docs/INDEX.md` §3 ADR-09、§1 SRAM/算法层行 | **DONE**（host 侧；档案写入路径与制动策略未做，见 ADR-09 失效条件） |
 | T-006 | B | 规范：驱动所有权 move 移交、enum 静态分发、热路径返回 `()`、热路径零隐式 panic；同步 `software-architecture.md` §3.3/§9 | 事实见 `docs/INDEX.md` §3 ADR-10、`AGENTS.md` §1.1 MECH-01…04 | **DONE**（纯文档，无代码可测；门禁见 §2） |
 | T-007 | B | 协作协议落地：H1–H5 硬门禁（`hygiene` / `tier` / clippy 双 workspace）、S1–S3 软协议、`docs/agent-guardrails.md` | 无业务代码；决策见 `docs/INDEX.md` §3 ADR-11 | **DONE**（host 侧；`tier` 对 Tier B 按设计 FAIL） |
+| T-008 | B | 可脱离实板的信号链：`foc` / `svpwm` / `sense` / `pid`（移植 Apache-2.0 上游） | 无契约变更；来源与改动见 `docs/INDEX.md` §3 ADR-12、`docs/reference-implementations.md` §8 | **DONE**（host 侧；`calib`/`safety` 并入 `gate`，不另建） |
 
 ## 2. 本会话验收门（T-002 + T-003 + T-005 + T-006）
 
@@ -38,6 +39,12 @@ T-007（2026-11-21，xtask 工具 + 文档，命令原文输出摘要）：
 - [x] `cargo xtask clippy`：firmware 与根 workspace（`--workspace --all-targets`）两遍均 `Finished`，exit 0
 - [x] `cargo xtask tier`：**FAIL（按设计）**——`firmware/Cargo.toml`、`firmware/memory.x` 属 Tier B 且无台架证据
 - [x] `cargo xtask test`：`33 passed`（contracts）+ `43 passed`（user），4 条 `test result` 均 0 failed，exit 0
+- [x] `cargo xtask fmt-check` / `check` / `doc` / `arch` / `size`：全 PASS；`flash image 17,768 B (27.1 %)`，exit 0
+
+T-008（2026-11-21，信号链移植，命令原文输出摘要）：
+- [x] `cargo xtask test`：`33 passed`（contracts）+ `67 passed`（user，含新增 24 条），4 条 `test result` 均 0 failed，exit 0
+- [x] `cargo xtask clippy`：firmware 与根 workspace（`--workspace --all-targets`）两遍均 `Finished`，exit 0
+- [x] `cargo xtask hygiene`：`PASS H2/H5/H4`（32 个文件），exit 0
 - [x] `cargo xtask fmt-check` / `check` / `doc` / `arch` / `size`：全 PASS；`flash image 17,768 B (27.1 %)`，exit 0
 
 ## 3. 最近一次台架实测（HIL）

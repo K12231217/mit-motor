@@ -76,12 +76,15 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/encoder/frame.rs  #   24 bit 帧、CRC-6、状态位、全 0 护栏 [已实现]
   src/encoder/monitor.rs#   四方接受判据、丢失拍放宽、两帧去抖 [已实现]
   src/encoder/tests.rs  #   编码器回归测试 [已实现]
-  src/foc.rs            #   规划：Clarke/Park 与逆变换
-  src/svpwm.rs          #   规划：七段式 + 占空比夹紧
-  src/sense.rs          #   规划：code → 安培（含零位/增益表）
-  src/calib.rs          #   规划：RLS 相对增益估计 + 双缓冲
-  src/safety.rs         #   规划：窗口/激励/跨工况一致性判据 → 冻结/锁存
-  src/pid.rs            #   规划：电流环 PI
+  src/foc.rs            #   Clarke/Park/逆 Park + 无 libm 正余弦 [已实现，移植 calebfletcher/foc]
+  src/foc/tests.rs      #   变换与正余弦精度测试 [已实现]
+  src/svpwm.rs          #   几何扇区 SVPWM + 比较值换算 [已实现，移植 oxifoc]
+  src/svpwm/tests.rs    #   矢量还原、扇区表、寄存器范围 [已实现]
+  src/sense.rs          #   原始码 → 安培（折叠标度 + 零位码）[已实现，移植 oxifoc]
+  src/sense/tests.rs    #   零位、单码标度、通道顺序 [已实现]
+  src/pid.rs            #   电流环 PI（条件积分抗饱和）[已实现，移植 calebfletcher/foc + 本地限幅]
+  src/pid/tests.rs      #   比例、积分收敛、抗饱和 [已实现]
+  # calib.rs / safety.rs 不另建：相对增益估计与可信性判据已在 gate.rs（ADR-12）
 
 4_app/                  # 装配（包名 app，bin）
   src/main.rs           #   #[app(device = ..., peripherals = false)]

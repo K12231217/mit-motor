@@ -87,3 +87,19 @@ pub enum Frame { Command(Cmd), Feedback(Feedback), Trace(TraceChunk) }
 - 论文侧已完成 41 篇归纳，见 [research-findings.md](research-findings.md)；P2（集成驱动片上采样）与部分 2025–2026 方法因 OpenAlex 配额停在 41/60，可换 Crossref/arXiv 补齐。
 - `g0_gimbal_motor`（唯一使用 MP6540 的仓库）尚未逐文件读，需补采样与 PWM 配置对照。
 - `trouverun/rust-stm32g4` 的平台层运行时待确认。
+
+## 8. 已移植（2026-11-21，ADR-12）
+
+只取许可证允许修改与再分发的实现；每个文件头部保留上游仓库、提交号与许可证。
+
+| 上游 | 许可证 | 提交 | 上游文件 | 本地落点 | 本地改动 |
+|---|---|---|---|---|---|
+| [`calebfletcher/foc`](https://github.com/calebfletcher/foc) | Apache-2.0 | `1db0260` | `src/park_clarke.rs` | `3_user/src/foc.rs` | `I16F16` → `f32`；加量纲后缀；未移植 `inverse_clarke` |
+| 同上 | Apache-2.0 | `1db0260` | `src/pwm.rs`（`SpaceVector`） | `3_user/src/svpwm.rs` | `f32`、`enum Sector`（消掉 `unreachable!`）、比较值 API |
+| 同上 | Apache-2.0 | `1db0260` | `src/pid.rs`（`PIController`） | `3_user/src/pid.rs` | 加输出限幅与条件积分（源码无抗饱和） |
+| [`okhsunrog/oxifoc`](https://github.com/okhsunrog/oxifoc) | Apache-2.0 | `3d48332` | `oxifoc-core/src/foc/svpwm.rs` | `3_user/src/svpwm.rs` | 与上表的扇区实现合并，取 oxifoc 的扇区判据与作用时间 |
+| 同上 | Apache-2.0 | `3d48332` | `oxifoc-core/src/foc/current_sense.rs` | `3_user/src/sense.rs` | 去掉 `shunt`/`opamp_gain`（MP6540 内部检测），保留折叠标度与零位码 |
+| [`tarcieri/micromath`](https://github.com/tarcieri/micromath) | MIT OR Apache-2.0 | `eb73416` | `src/float/{sin,cos}.rs` | `3_user/src/foc.rs`（私有） | `floor` 用截断 + 修正实现（`core` 无 `floor`） |
+
+> 未采用的候选：`qff233/FOC` 的 `license` 字段为 `null`，按 `open-source-reuse.md` 不复制源码；
+> `gulitsky/reactance` 为 `NOASSERTION`，同样只做结构参考。
