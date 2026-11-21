@@ -18,3 +18,7 @@
 # 厂商资料（DS 的 Markdown/SVG/zip）不入库：体积大、可重新下载，引脚事实在文档里引用路径与章节号。
 docs/DS_stm32g474rb/
 docs/DS_stm32g474rb.zip
+
+# 第三方参考仓库的完整克隆（当前是 YHorizon-JM，自带 .git，约 38 MB）不入库：
+# 它属于上游代码，不是本仓产物。需要时按 docs/reference-implementations.md 的链接重新 clone。
+docs/ref/
