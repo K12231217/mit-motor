@@ -34,9 +34,12 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/snapshot.rs       #   Snapshot<T>：seqlock，快环↔慢环唯一的跨优先级通道
   src/events.rs         #   Event / Cmd 枚举 + 各队列容量常量
   src/faults.rs         #   FaultCode + 32 bit 状态字位定义
+  src/fsm.rs            #   状态机类型：MotorState / Event / 迁移输入
+  src/trust.rs          #   Trust 等契约层结果类型（门控可信度）
   src/icd.rs            #   TraceFrame / CanFrame 的 repr(C) 布局 + 编译期 size 断言
   src/limits/hw.rs      #   器件事实与电气硬约束（D_MAX、采样窗口、MT6701 位宽）
   src/limits/budget.rs  #   系统预算（环频率、帧率、队列容量、看门狗）
+  src/limits/mod.rs     #   limits 汇总 re-export（数值仍只在 hw/budget 定义一次）
 
 1_bsp/                  # 唯一 unsafe 层（包名 bsp）
   src/lib.rs            #   Board 类型、init 构造后 move 移交、所有权表
@@ -62,14 +65,23 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
 
 3_user/                 # 纯算法（包名 user），no_std + forbid(unsafe)，x86 可测
   src/lib.rs            #   #![no_std] #![forbid(unsafe_code)]
-  src/fsm.rs            #   状态 × 事件迁移矩阵（纯函数，宿主机全表穷举）
-  src/foc.rs            #   Clarke/Park 与逆变换
-  src/svpwm.rs          #   七段式 + 占空比夹紧
-  src/sense.rs          #   code → 安培（含零位/增益表）
-  src/calib.rs          #   RLS 相对增益估计 + 双缓冲
-  src/safety.rs         #   窗口/激励/跨工况一致性判据 → 冻结/锁存
-  src/pid.rs
-  tests/                #   host 测试 + 回放数据集（fixtures/）
+  src/fsm.rs            #   状态 × 事件迁移矩阵（纯函数，宿主机全表穷举）[已实现]
+  src/fsm/tests.rs      #   迁移矩阵全表穷举测试 [已实现]
+  src/policy.rs         #   策略参数：门限/降额/盲推窗口/清故障窗口 [已实现]
+  src/gate.rs           #   四维结构门 + χ² 与发布判据 [已实现]
+  src/gate/accum.rs     #   正规方程累加器、组窗/半窗两级 χ² [已实现]
+  src/gate/math.rs      #   无 libm 数值（sqrt_f32 等）[已实现]
+  src/gate/tests.rs     #   门控回归测试 [已实现]
+  src/encoder.rs        #   MT6701 门面：帧解析 + 监控器 [已实现]
+  src/encoder/frame.rs  #   24 bit 帧、CRC-6、状态位、全 0 护栏 [已实现]
+  src/encoder/monitor.rs#   四方接受判据、丢失拍放宽、两帧去抖 [已实现]
+  src/encoder/tests.rs  #   编码器回归测试 [已实现]
+  src/foc.rs            #   规划：Clarke/Park 与逆变换
+  src/svpwm.rs          #   规划：七段式 + 占空比夹紧
+  src/sense.rs          #   规划：code → 安培（含零位/增益表）
+  src/calib.rs          #   规划：RLS 相对增益估计 + 双缓冲
+  src/safety.rs         #   规划：窗口/激励/跨工况一致性判据 → 冻结/锁存
+  src/pid.rs            #   规划：电流环 PI
 
 4_app/                  # 装配（包名 app，bin）
   src/main.rs           #   #[app(device = ..., peripherals = false)]
@@ -80,6 +92,9 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/tasks/io.rs       #   prio 1：executor.run()，跑 USB/UART 的 async 外壳
   src/fault.rs          #   #[panic_handler] + HardFault（unsafe 第二处）
   src/sections.rs       #   #[link_section] 保留段与 magic
+
+firmware/               # 现有模板（独立 workspace，单 bin blinky，无电机代码）
+  src/bin/blinky.rs     #   RTIC + embassy init 探针；不是交付路径
 ```
 
 > **一处修正**：async 任务的**外壳**放 `4_app/src/tasks/io.rs`，业务函数放 `3_user`。
@@ -274,6 +289,10 @@ const _: () = assert!(size_of::<Event>() <= 32);
 8. **待落地**（`1_bsp`/`2_system`/`4_app` 建好后再接进 `cargo xtask arch`）：MECH-01 的
    `static mut`/`static Option<驱动>` grep、MECH-02 的 `dyn` grep、MECH-03 的热路径签名 grep、
    MECH-04 的 `core::fmt` 符号审查。未建 crate 的检查记为 N/A，不计 PASS。
+
+9. 协作门禁（`cargo xtask hygiene`，落点见 [`agent-guardrails.md`](agent-guardrails.md)）：
+   H2 的 `TODO(owner, trigger)`、H5 的注释标记，以及 H4 —— 每个 `<crate>/src/**/*.rs`
+   必须出现在上面 §2 的文件树块里。新增模块不写文档即 FAIL。
 
 ## 10. 未定项（不影响文件架构，但影响第一行实现）
 

@@ -38,9 +38,10 @@ mod app {
         let p = embassy_stm32::init(Default::default());
         defmt::info!("Hello World!");
 
-        // TODO(board): LED is PB2 per docs/hardware-requirements.md §3
-        // (HR-505). PCB14 has no MCU-driven LED and the example's PC6 is
-        // unrouted there. Keep in sync with the schematic.
+        // TODO(board, G474 样机焊好并纳入台架后): LED is PB2 per
+        // docs/hardware-requirements.md §3 (HR-505). PCB14 has no MCU-driven
+        // LED and the example's PC6 is unrouted there. Keep in sync with the
+        // schematic.
         let mut led = Output::new(p.PB2, Level::High, Speed::Low);
         defmt::info!("high");
         led.set_high();

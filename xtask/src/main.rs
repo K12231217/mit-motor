@@ -3,9 +3,12 @@
 //! Every build / check / size / flash action lives here so CLion, VS Code and
 //! CI execute the same code path. No extra tools (just, make) are required.
 //!
-//! Commands: check build rel fmt fmt-check clippy test doc size flash rtt arch help
+//! Commands: check build rel fmt fmt-check clippy test doc size flash rtt arch
+//!           hygiene tier help
 
 mod checks;
+mod hygiene;
+mod tier;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -27,7 +30,18 @@ fn main() -> ExitCode {
         "fmt-check" => cargo(&["fmt", "--all", "--", "--check"]),
         // `--all-targets` pulls in the test harness, which needs std on a
         // no_std thumb target; the firmware has one bin and no lib.
-        "clippy" => cargo(&["clippy", "--bins", "--", "-D", "warnings"]),
+        // 根 workspace（算法层）也要过：`-D warnings` 把文档与 clippy 提示
+        // 一律升级为错误，测试目标同样拦。
+        "clippy" => cargo(&["clippy", "--bins", "--", "-D", "warnings"]).and_then(|()| {
+            root_cargo(&[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ])
+        }),
         // 根 workspace（host crate）的回归测试，不是 firmware。
         "test" => root_cargo(&["test", "--workspace"]),
         // 文档门禁：根 workspace 全量 rustdoc，任何警告即失败。
@@ -42,6 +56,14 @@ fn main() -> ExitCode {
             "`arch` takes no arguments (got {})",
             rest.join(" ")
         )),
+        // 协作卫生（docs/agent-guardrails.md H2/H4/H5）的唯一实现在 hygiene.rs。
+        "hygiene" if rest.is_empty() => hygiene::run(),
+        "hygiene" => Err(format!(
+            "`hygiene` takes no arguments (got {})",
+            rest.join(" ")
+        )),
+        // 分级门禁（H3）：Tier B 改动无 HIL 证据不得进 main。
+        "tier" => tier::run(&rest),
         "help" | "-h" | "--help" => {
             help();
             Ok(())
@@ -75,6 +97,7 @@ usage: cargo xtask <command> [args]
   fmt         cargo fmt --all
   fmt-check   cargo fmt --all -- --check      (CI)
   clippy      cargo clippy --bins -- -D warnings   (firmware)
+              then cargo clippy --workspace --all-targets -- -D warnings (root)
   test        cargo test --workspace         (root workspace, host)
   doc         cargo doc --no-deps --workspace (RUSTDOCFLAGS=-D warnings)
   size        build --release, then print ELF sections and flash image
@@ -83,7 +106,13 @@ usage: cargo xtask <command> [args]
   rtt         probe-rs attach --chip <chip from .cargo/config.toml> [args]
   arch        architecture invariants, pure Rust (docs/software-
               architecture.md §9): I1 dependency direction, I2 unsafe,
-              I3 no heap; FAILs if the release ELF is missing"
+              I3 no heap; FAILs if the release ELF is missing
+  hygiene     collaboration checks (docs/agent-guardrails.md):
+              H2 TODO(owner, trigger), H5 comment markers,
+              H4 every module file listed in the architecture doc
+  tier [base] H3 tier gate: Tier B paths (firmware/, 1_bsp/, 2_system/,
+              4_app/) changed vs `base` (default origin/main or $TIER_BASE)
+              need a `HIL: PASS` line in .scratch/handoff.md"
     );
 }
 

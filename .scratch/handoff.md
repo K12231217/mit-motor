@@ -14,6 +14,7 @@
 | T-004 | A | 探针：`embassy_stm32::init()` 返回的 `Peripherals` 与裸 PAC `steal()` 的衔接 | 无（探针免脚手架） | **BLOCKED**：无 G474 实板；可先在 host 读 embassy 源码给结论，寄存器行为属 `UNVERIFIED` |
 | T-005 | B | 状态 × 事件迁移矩阵（`3_user/src/fsm.rs` + 类型 `0_contracts/src/fsm.rs`）、状态字 bit 15 `cmd_reject`、清故障窗口、bank 2 标定档案双槽布局、`arch` 增 I7 | 事实与证据见 `docs/INDEX.md` §3 ADR-09、§1 SRAM/算法层行 | **DONE**（host 侧；档案写入路径与制动策略未做，见 ADR-09 失效条件） |
 | T-006 | B | 规范：驱动所有权 move 移交、enum 静态分发、热路径返回 `()`、热路径零隐式 panic；同步 `software-architecture.md` §3.3/§9 | 事实见 `docs/INDEX.md` §3 ADR-10、`AGENTS.md` §1.1 MECH-01…04 | **DONE**（纯文档，无代码可测；门禁见 §2） |
+| T-007 | B | 协作协议落地：H1–H5 硬门禁（`hygiene` / `tier` / clippy 双 workspace）、S1–S3 软协议、`docs/agent-guardrails.md` | 无业务代码；决策见 `docs/INDEX.md` §3 ADR-11 | **DONE**（host 侧；`tier` 对 Tier B 按设计 FAIL） |
 
 ## 2. 本会话验收门（T-002 + T-003 + T-005 + T-006）
 
@@ -32,11 +33,23 @@ T-006（2026-11-19，纯文档，命令原文输出摘要）：
 - [x] `cargo xtask clippy`：`Finished dev profile`，无 warning，exit 0
 - [x] `cargo xtask arch`：`PASS I1/I2/I3/I7` + `arch_check: PASS`，exit 0（MECH 检查未接入，见 `software-architecture.md` §9-8）
 
+T-007（2026-11-21，xtask 工具 + 文档，命令原文输出摘要）：
+- [x] `cargo xtask hygiene`：`PASS H2`（24 个文件）、`PASS H5`（24 个文件）、`PASS H4`（24 个模块），exit 0
+- [x] `cargo xtask clippy`：firmware 与根 workspace（`--workspace --all-targets`）两遍均 `Finished`，exit 0
+- [x] `cargo xtask tier`：**FAIL（按设计）**——`firmware/Cargo.toml`、`firmware/memory.x` 属 Tier B 且无台架证据
+- [x] `cargo xtask test`：`33 passed`（contracts）+ `43 passed`（user），4 条 `test result` 均 0 failed，exit 0
+- [x] `cargo xtask fmt-check` / `check` / `doc` / `arch` / `size`：全 PASS；`flash image 17,768 B (27.1 %)`，exit 0
+
 ## 3. 最近一次台架实测（HIL）
 
 **无**。至今没有任何 G474RBT6 实板数据：未烧写、未跑自检、无示波器/LA 记录。
 `hardware-requirements.md` 里所有"待实测"条目（OVP 翻转点、EN 低是否高阻、ADC 跨组偏斜）全部仍为 `OPEN`。
 本仓现有数字全部来自合成数据（host 数值实验），不是台架证据——口径见 `docs/INDEX.md` §6。
+
+Tier B 门禁（`cargo xtask tier`）在 `feat/contracts-and-gate` 上**按设计 FAIL**：`firmware/Cargo.toml`
+与 `firmware/memory.x` 相对 main 有改动，属硬件耦合路径且无台架证据。整改只有两条：改动留在
+hil-pending 分支，或补一条独立成行的台架证据记录（格式见 `docs/agent-guardrails.md` §1 的 H3）。
+不要为了让它变绿而改门禁代码。
 
 ## 4. 下一个可验收单元
 

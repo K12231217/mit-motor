@@ -15,6 +15,10 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@v5
+        with:
+          # `cargo xtask tier` diffs against a base commit; a shallow clone has
+          # no base to diff against.
+          fetch-depth: 0
       - run: rustup target add thumbv7em-none-eabihf
       # `cargo xtask size` uses llvm-size/llvm-objcopy from this component.
       - run: rustup component add llvm-tools
@@ -26,3 +30,17 @@ jobs:
       - run: cargo xtask test
       - run: cargo xtask doc
       - run: cargo xtask arch
+      # H2/H4/H5: no ownerless TODO, no history/process comments, every module
+      # file listed in docs/software-architecture.md.
+      - run: cargo xtask hygiene
+      # H3: Tier B paths (firmware/, 1_bsp/, 2_system/, 4_app/) need a
+      # `HIL: PASS` line in .scratch/handoff.md. A FAIL here is the gate
+      # working: keep the change on a hil-pending branch instead.
+      - name: Tier gate (push)
+        if: github.event_name == 'push'
+        run: cargo xtask tier "${{ github.event.before }}"
+      - name: Tier gate (pull_request)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+          cargo xtask tier "origin/${{ github.base_ref }}"

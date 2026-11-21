@@ -17,12 +17,12 @@
 | PWM | TIM1 中心对齐 **20 kHz**，ARR=4250，死区由 BDTR 产生 | HR-302 |
 | 工具链 | `nightly-2025-11-05-x86_64-pc-windows-gnu`（本机无 MSVC）；`thumbv7em-none-eabihf` | `rust-toolchain.toml` |
 | 实测 rustc | 1.93.0-nightly (f15a7f385 2025-11-04) | `rustc --version`，2026-11-15 |
-| 构建入口 | `cargo xtask <cmd>`（`check/build/rel/fmt/fmt-check/clippy/test/size/flash/rtt/arch/help`），唯一实现 `xtask/src/main.rs`；IDE 与 CI 只调它 | `.cargo/config.toml`、`xtask/src/main.rs` 的 `help()` |
+| 构建入口 | `cargo xtask <cmd>`（`check/build/rel/fmt/fmt-check/clippy/test/size/flash/rtt/arch/hygiene/tier/help`），唯一实现 `xtask/src/main.rs`；IDE 与 CI 只调它 | `.cargo/config.toml`、`xtask/src/main.rs` 的 `help()` |
 | workspace 结构 | 根 `Cargo.toml` = workspace，成员只有 `0_contracts` + `3_user`，`exclude = ["firmware", "xtask"]`；`firmware/` 仍是独立 workspace（单 bin `blinky`）；`1_bsp`/`2_system`/`4_app` **未建** | 根 `Cargo.toml`、`firmware/Cargo.toml` 自带 `[workspace]` |
 | 烧写目标 | `probe-rs --chip STM32G474RB --connect-under-reset` | `firmware/.cargo/config.toml` |
 | 运行时 | RTIC 2.4 + `embassy-stm32` 0.1.0（`stm32g474rb`）混合；**单 bin `blinky` 模板，无电机代码** | `firmware/Cargo.toml` |
 | 镜像基线 | release 镜像 **17,768 B / 27.1 %**（Flash 区 65,536 B = 64 KiB）；`.text` 14,632 / `.rodata` 2,552 / `.data` 112 / `.bss` 480 | `cargo xtask size`，2026-11-16 实测 |
-| 门禁基线 | `test` / `check` / `fmt-check` / `clippy` / `rel` / `size` / `arch`（= I1/I2/I3/I7）全 PASS（均为 `cargo xtask <cmd>`；数字以各命令输出为准） | 2026-11-16 实测 |
+| 门禁基线 | `test` / `check` / `fmt-check` / `clippy`（firmware + 根 workspace）/ `rel` / `size` / `arch`（= I1/I2/I3/I7）/ `hygiene`（H2/H4/H5）全 PASS；`tier`（H3）按基线分支判定，Tier B 无 HIL 即 FAIL（均为 `cargo xtask <cmd>`；数字以各命令输出为准） | 2026-11-21 实测 |
 | 门控定版 | 四维结构门 `R ≥ 0.995`、`d ≥ 0.01`、`z ≤ 0.02`、`pred ≤ 0.9·0.5 pp`；`χ²(2) ≤ 9.21` **只在结构门之后**算；`z=\|A0\|·√3/√(G·A1)`、`G=200`、`λ=1−1/2000`、`N_eq ≤ 3999` | 实现 `3_user/src/gate.rs`（`GateParams`/`GainAccum`/`GainGate`）；数值唯一来源：器件/电气在 `0_contracts/src/limits/hw.rs`、时序容量在 `limits/budget.rs`、策略阈值在 `3_user/src/policy.rs`（三者已分离，`limits/mod.rs` 汇总；两处不许互抄数值）。已数值否定、禁止复活（离线实验，脚本未入仓）：`d` 当跨工况阈值（实测反序，见 AGENTS §4-8）、`λ_min ≥ 135` 这类常数（应现算）、TLS（低幅区本应被门控拒） |
 | 算法层内容 | `3_user/src/`：`gate.rs`（四维门 + χ²，阈值/公式见「门控定版」）、`encoder.rs`（MT6701 帧解析、四方接受判据、丢失拍数放宽、两帧去抖）、`fsm.rs`（状态 × 事件迁移矩阵，纯 `const fn`，按 `state × event × record_valid` 全表穷举；类型在 `contracts/src/fsm.rs`）、`policy.rs`（策略参数：门限/降额/盲推窗口/SPI 分频/清故障窗口，只引用 `contracts::limits` 派生）；两个 crate 无 `todo!()`，测试条数以 `cargo xtask test` 为准 | `ls 3_user/src`；`grep -rn 'todo!' 0_contracts/src 3_user/src` 为空 |
 | 已拍定口径 | `D_MAX=0.80`；编码器 SPI **10.625 MHz**；故障动作 **coast**（台架不带重力负载）；**标定档案落 bank 2 双槽**（布局见 ADR-09；写入路径随 `1_bsp` 建）；**砍板载 USB**（上位机走 CAN FD） | `0_contracts/src/limits/hw.rs` 的 `D_MAX` 与 `CALIB_SLOT_*`、`3_user/src/policy.rs` 的 `ENC_SPI_HZ`；其余为 2026-11-16 用户裁定，代码落点未建（未验证） |
@@ -40,6 +40,7 @@
 | [`software-architecture.md`](software-architecture.md) | 固件文件架构 v0.1（五 crate、不变量 I1–I6、段布局、三个数字契约） | **文件/模块边界唯一版本**（取代 `architecture.md` §4–§6） |
 | [`architecture.md`](architecture.md) | 固件架构草稿 v0.1 | **硬件事实 §2**（引脚/驱动行为/采样链/安全路径）与决策历史 |
 | [`agent-readiness.md`](agent-readiness.md) | 交 agent 开发前的七类缺口（A–G）+ S0–S8 自检阶梯 | bring-up 阶梯与**验收口径** |
+| [`agent-guardrails.md`](agent-guardrails.md) | Agent 协作协议落地版（H1–H5 硬门禁 / S1–S3 软协议 / Skill 回归） | **门禁落点与限制**的唯一说明；命令实现仍在 `xtask/src/{checks,hygiene,tier}.rs` |
 | [`hardware-taskbook.md`](hardware-taskbook.md) | 外包硬件任务书 v2.3 | 对外唯一版本（不复制引脚表） |
 | [`taskbook-review.md`](taskbook-review.md) | 任务书对抗审核 V2.0 | 审核结论与错误清单 |
 | [`research-plan-v1.1-2026-11-04.md`](research-plan-v1.1-2026-11-04.md) | 研究方案 V1.1 | 毕设主线与边界（正文题目仍写 G491；变更已获批，见 §1 主控） |
@@ -174,6 +175,25 @@ enum 让新增设备型变成编译错误而不是漏实现，也不为 vtable �
 - 失效条件：固件需要运行时发现/插拔未知设备型（enum 无法穷举）；或 RTIC/embassy 的资源模型不允许
   把 `init` 产出的具体类型 move 进任务（`cargo xtask check` 失败）；或同一功能需要同一固件的第二块
   板不同实现（单态化出现第二份代码，泛型前提破裂）。
+
+### ADR-11 协作门禁 = 命令 + 唯一真源，不生成第二份地图（已定，2026-11-21）
+
+来源：`docs/agent-guardrails.md`（Cursor 分享的 H1–H5 / S1–S3 重构版）。
+候选（H4 架构地图）：脚本自动生成 `FEATURE_MAP.md` + CI `--check`、
+**只查"每个模块文件是否写进 `docs/software-architecture.md` §2 的文件树"** → 选后者。
+理由：生成物立刻成为第二份架构真源，与 PRE-10 的"文件架构唯一真源"直接冲突；而 H4 的真实
+目标是"新模块出现时文档同步"，查包含关系就够了。代价：不能从地图反查调用关系，也不能排序/统计。
+候选（H3 分级）：人工在 PR 模板里勾选 Tier、**按路径自动判 Tier B + 按 `handoff.md` 的 `HIL: PASS`
+行判证据** → 选后者。理由：勾选栏永远能勾"否"；路径表写在 `xtask/src/tier.rs`，改判定必须改代码。
+代价：`firmware/memory.x`、`firmware/Cargo.toml` 这类"只改配置"的硬件耦合改动同样算 Tier B
+（本分支即活例，`cargo xtask tier` 按设计 FAIL）；单仓无分支保护，直接 push main 的信任边界止于
+`github.event.before`。
+候选（H5 注释）：照搬"只留 `ERRATA:`/`REF:`"、**取交集：禁历史/流程词、块注释、`// SAFETY:`、
+ASCII 分隔线，Why 注释保留** → 选后者。理由：`docs/comment-style.md` §12 要求写 Why（物理依据、
+不变量），传感器/电机代码大多数没有外部编号可指，照搬会删掉唯一能读懂门控与编码器判据的注释。
+- 失效条件：出现 `5_*` 之类不在 `TIER_B_PREFIXES` 的硬件耦合目录（门禁静默漏判）；或
+  `docs/software-architecture.md` §2 不再按 `<crate>/` 分块（`hygiene` H4 整体报缺块）；或
+  `cargo xtask clippy` 的根 workspace 一遍被删（H2 只剩 firmware 覆盖）。
 
 ## 4. 文档 vs 代码树：已确认的落差
 
