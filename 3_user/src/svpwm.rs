@@ -65,53 +65,57 @@ pub fn get_sector(alpha: f32, beta: f32) -> Sector {
     }
 }
 
+/// `2/√3`：SVPWM 作用时间的常数乘子，编译期折叠。
+const TWO_BY_SQRT3: f32 = 2.0 * crate::foc::FRAC_1_SQRT3;
+
 /// αβ 调制量 → 三相比较值（源 `space_vector_pwm`）。
 ///
 /// 返回顺序 A/B/C，每个值夹在 `0..=max_duty`。`max_duty` 是定时器 ARR；
 /// 传入更小的值即可同时施加占空比上限（例如 `ARR × D_MAX`）。
+#[inline]
 pub fn space_vector_pwm(alpha: f32, beta: f32, max_duty: u16) -> [u16; 3] {
     let sector = get_sector(alpha, beta);
     let pwm_full = i32::from(max_duty);
+    let pwm_full_f = pwm_full as f32;
     let one_by_sqrt3 = crate::foc::FRAC_1_SQRT3;
-    let two_by_sqrt3 = 2.0 * one_by_sqrt3;
 
     let (ta, tb, tc) = match sector {
         Sector::S1 => {
-            let t1 = ((alpha - one_by_sqrt3 * beta) * pwm_full as f32) as i32;
-            let t2 = (two_by_sqrt3 * beta * pwm_full as f32) as i32;
+            let t1 = ((alpha - one_by_sqrt3 * beta) * pwm_full_f) as i32;
+            let t2 = (TWO_BY_SQRT3 * beta * pwm_full_f) as i32;
             let ta = (pwm_full + t1 + t2) / 2;
             (ta, ta - t1, ta - t1 - t2)
         }
         Sector::S2 => {
-            let t2 = ((alpha + one_by_sqrt3 * beta) * pwm_full as f32) as i32;
-            let t3 = ((-alpha + one_by_sqrt3 * beta) * pwm_full as f32) as i32;
+            let t2 = ((alpha + one_by_sqrt3 * beta) * pwm_full_f) as i32;
+            let t3 = ((-alpha + one_by_sqrt3 * beta) * pwm_full_f) as i32;
             let tb = (pwm_full + t2 + t3) / 2;
             (tb - t3, tb, tb - t3 - t2)
         }
         Sector::S3 => {
-            let t3 = (two_by_sqrt3 * beta * pwm_full as f32) as i32;
-            let t4 = ((-alpha - one_by_sqrt3 * beta) * pwm_full as f32) as i32;
+            let t3 = (TWO_BY_SQRT3 * beta * pwm_full_f) as i32;
+            let t4 = ((-alpha - one_by_sqrt3 * beta) * pwm_full_f) as i32;
             let tb = (pwm_full + t3 + t4) / 2;
             let tc = tb - t3;
             (tc - t4, tb, tc)
         }
         Sector::S4 => {
-            let t4 = ((-alpha + one_by_sqrt3 * beta) * pwm_full as f32) as i32;
-            let t5 = (-two_by_sqrt3 * beta * pwm_full as f32) as i32;
+            let t4 = ((-alpha + one_by_sqrt3 * beta) * pwm_full_f) as i32;
+            let t5 = (-TWO_BY_SQRT3 * beta * pwm_full_f) as i32;
             let tc = (pwm_full + t4 + t5) / 2;
             let tb = tc - t5;
             (tb - t4, tb, tc)
         }
         Sector::S5 => {
-            let t5 = ((-alpha - one_by_sqrt3 * beta) * pwm_full as f32) as i32;
-            let t6 = ((alpha - one_by_sqrt3 * beta) * pwm_full as f32) as i32;
+            let t5 = ((-alpha - one_by_sqrt3 * beta) * pwm_full_f) as i32;
+            let t6 = ((alpha - one_by_sqrt3 * beta) * pwm_full_f) as i32;
             let tc = (pwm_full + t5 + t6) / 2;
             let ta = tc - t5;
             (ta, ta - t6, tc)
         }
         Sector::S6 => {
-            let t6 = (-two_by_sqrt3 * beta * pwm_full as f32) as i32;
-            let t1 = ((alpha + one_by_sqrt3 * beta) * pwm_full as f32) as i32;
+            let t6 = (-TWO_BY_SQRT3 * beta * pwm_full_f) as i32;
+            let t1 = ((alpha + one_by_sqrt3 * beta) * pwm_full_f) as i32;
             let ta = (pwm_full + t6 + t1) / 2;
             let tc = ta - t1;
             (ta, tc - t6, tc)
@@ -133,10 +137,19 @@ pub fn normalize_volts(alpha_v: f32, beta_v: f32, vbus_v: f32) -> Option<(f32, f
     if vbus_v <= 0.0 || !vbus_v.is_finite() {
         return None;
     }
+    normalize_volts_with_inv(alpha_v, beta_v, 1.0 / vbus_v)
+}
+
+/// 已缓存 `1/vbus` 时的归一化入口：20 kHz 环只做乘法，除法留在 1 kHz 慢任务。
+#[inline]
+pub fn normalize_volts_with_inv(alpha_v: f32, beta_v: f32, inv_vbus: f32) -> Option<(f32, f32)> {
+    if inv_vbus <= 0.0 || !inv_vbus.is_finite() {
+        return None;
+    }
     if !alpha_v.is_finite() || !beta_v.is_finite() {
         return None;
     }
-    let scale = 1.5 / vbus_v;
+    let scale = 1.5 * inv_vbus;
     Some((alpha_v * scale, beta_v * scale))
 }
 

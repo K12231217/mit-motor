@@ -110,7 +110,7 @@ tools/
 | 2 | `telemetry` | USART3 / USB | 1 ms | 剩余预算 |
 | 1 | `calib` | 软件定时 | 10 ms | 剩余预算 |
 
-时间基准：HSE 16 MHz → PLL（M=4, N=85, R=2）→ **170 MHz**，需开 boost 模式。20 kHz center-aligned → `ARR = 4250`，50 µs = 8500 周期。
+时间基准：HSE 16 MHz → PLL（M=4, N=85, R=2）→ **170 MHz**，需开 boost 模式。20 kHz center-aligned → `ARR = 4250`，50 µs = 8500 周期。40 kHz 方案评估后回退（ADR-14）。
 
 ## 6. 数据流
 

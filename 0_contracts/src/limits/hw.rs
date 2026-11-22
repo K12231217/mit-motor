@@ -15,16 +15,15 @@ use super::budget::ISR_PERIOD_US;
 /// ⇒ 5.0 µs。
 pub const SAMPLE_WINDOW_MIN_NS: u32 = 5_000;
 
-/// PWM 半周期，单位 ns（中心对齐 20 kHz，HR-302：ARR = 4250 @ 42.5 MHz）。
+/// PWM 半周期，单位 ns（中心对齐 20 kHz，HR-302：ARR = 4250 @ 170 MHz）。
 ///
 /// 中心对齐时一个 50 µs 周期有两次低边共导窗口，各占半个周期。
 pub const PWM_HALF_PERIOD_NS: u32 = ISR_PERIOD_US * 1_000 / 2;
 
 /// 高边占空比上限。
 ///
-/// 由 [`SAMPLE_WINDOW_MIN_NS`] 反推：`1 - 5.0/25 = 0.80`（半周期 25 µs）。HR-305 的
-/// 3 µs / 90 % 是同一约束的下限版本，这里取更严的值。超过它，半周期内留给低边采样
-/// 的窗口不足 5 µs。
+/// 由 [`SAMPLE_WINDOW_MIN_NS`] 反推：`1 - 5.0/25 = 0.80`（半周期 25 µs）。
+/// 40 kHz 载波会把上限压到 0.60，已按电机参数评估后回退 20 kHz（ADR-14）。
 pub const D_MAX: f32 = 0.80;
 
 /// 电流采样对（ADC1/2 与 ADC3/4）的固定偏斜上限，单位 ns。

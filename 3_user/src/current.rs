@@ -103,6 +103,7 @@ impl CurrentLoop {
     /// 控制律顺序固定：PI → 交叉解耦 → 反电势前馈 → 电压圆限幅 → 积分器反算。
     /// `omega_e_rad_s` 是电角速度（`[INFERENCE]` 由编码器/观测器提供），`vbus_v` 必须
     /// 为正且有限。输入非法时清零积分并返回零电压。
+    #[inline]
     pub fn current_loop(
         &mut self,
         i_dq: Dq,
@@ -117,19 +118,16 @@ impl CurrentLoop {
         }
 
         let max_v_mag = MAX_VOLTS_PER_VBUS * vbus_v;
-        let error_d_amps = target.d_amps - i_dq.d_amps;
-        let error_q_amps = target.q_amps - i_dq.q_amps;
-
-        let vd_pi = self.pi_d.update(target.d_amps, i_dq.d_amps, dt_s);
-        let vq_pi = self.pi_q.update(target.q_amps, i_dq.q_amps, dt_s);
+        let pi_d = self.pi_d.update_with_p(target.d_amps, i_dq.d_amps, dt_s);
+        let pi_q = self.pi_q.update_with_p(target.q_amps, i_dq.q_amps, dt_s);
 
         // 与 VESC 同号：vd -= iq·ωe·Lq，vq += id·ωe·Ld + ωe·ψm。
         let dec_vd = i_dq.q_amps * omega_e_rad_s * self.params.lq_h;
         let dec_vq = i_dq.d_amps * omega_e_rad_s * self.params.ld_h;
         let dec_bemf = omega_e_rad_s * self.params.flux_wb;
 
-        let vd_unclamped = vd_pi - dec_vd;
-        let vq_unclamped = vq_pi + dec_vq + dec_bemf;
+        let vd_unclamped = pi_d.voltage_v - dec_vd;
+        let vq_unclamped = pi_q.voltage_v + dec_vq + dec_bemf;
         if !vd_unclamped.is_finite() || !vq_unclamped.is_finite() {
             self.reset();
             return DqVolts::ZERO;
@@ -138,24 +136,36 @@ impl CurrentLoop {
         // d 轴优先：先把 vd 夹到 max_v_mag，再用剩余长度夹 vq。
         let vd_v = vd_unclamped.clamp(-max_v_mag, max_v_mag);
         let remaining_v2 = max_v_mag * max_v_mag - vd_v * vd_v;
-        let max_vq = if remaining_v2 > 0.0 {
-            sqrt_f32(remaining_v2)
+        // 线性区（多数拍）不调 sqrt：q 轴装得下就原样通过。
+        let vq_v = if vq_unclamped * vq_unclamped <= remaining_v2 {
+            vq_unclamped
         } else {
-            0.0
+            clamp_vq_saturated(vq_unclamped, remaining_v2)
         };
-        let vq_v = vq_unclamped.clamp(-max_vq, max_vq);
 
         // 反算到 PI 输出侧：总电压 = pi - dec_vd，或 pi + dec_vq + dec_bemf。
         self.pi_d
-            .back_calculate_integral(vd_v + dec_vd, error_d_amps);
+            .back_calculate_integral_from_p(vd_v + dec_vd, pi_d.proportional_v);
         self.pi_q
-            .back_calculate_integral(vq_v - dec_vq - dec_bemf, error_q_amps);
+            .back_calculate_integral_from_p(vq_v - dec_vq - dec_bemf, pi_q.proportional_v);
 
         DqVolts {
             d_v: vd_v,
             q_v: vq_v,
         }
     }
+}
+
+/// 饱和分支：只有 q 轴装不下时才进来，放在冷段避免污染热路径 I-cache。
+#[cold]
+#[inline(never)]
+fn clamp_vq_saturated(vq_unclamped: f32, remaining_v2: f32) -> f32 {
+    let max_vq = if remaining_v2 > 0.0 {
+        sqrt_f32(remaining_v2)
+    } else {
+        0.0
+    };
+    vq_unclamped.clamp(-max_vq, max_vq)
 }
 
 /// 入口唯一一次有限性检查。

@@ -50,10 +50,10 @@ pub use crate::encoder::{
     angle_rad, jump_limit_lsb, parse, AngleOutcome, EncoderMonitor, EncoderParams, Fault, Frame,
     FrameError, Health,
 };
-pub use crate::foc::{AlphaBeta, AlphaBetaVolts, Dq};
+pub use crate::foc::{AlphaBeta, AlphaBetaVolts, Dq, SinCos};
 pub use crate::fsm::step;
 pub use crate::gate::{GainAccum, GainGate, GateParams};
-pub use crate::pid::Pi;
+pub use crate::pid::{Pi, PiOutput};
 pub use crate::sense::SenseParams;
-pub use crate::svpwm::Sector;
+pub use crate::svpwm::{normalize_volts_with_inv, Sector};
 pub use contracts::Trust;

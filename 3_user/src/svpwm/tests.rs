@@ -1,6 +1,6 @@
 // 上游 `oxifoc-core/src/foc/svpwm.rs` 的测试，改为调用本地 API。
 
-use super::{get_sector, normalize_volts, space_vector_pwm, Sector};
+use super::{get_sector, normalize_volts, normalize_volts_with_inv, space_vector_pwm, Sector};
 
 const MAX_DUTY: u16 = 1_000;
 const ONE_BY_SQRT3: f32 = 0.577_350_27;
@@ -89,4 +89,15 @@ fn normalizing_volts_uses_the_source_contract() {
     assert!(normalize_volts(0.0, 0.0, -24.0).is_none());
     assert!(normalize_volts(0.0, 0.0, f32::NAN).is_none());
     assert!(normalize_volts(f32::NAN, 0.0, 24.0).is_none());
+}
+
+#[test]
+fn cached_inverse_bus_matches_direct_normalization() {
+    let vbus = 24.0f32;
+    let direct = normalize_volts(3.0, -2.0, vbus);
+    let cached = normalize_volts_with_inv(3.0, -2.0, 1.0 / vbus);
+    assert_eq!(direct, cached);
+
+    assert_eq!(normalize_volts_with_inv(3.0, -2.0, 0.0), None);
+    assert_eq!(normalize_volts_with_inv(3.0, -2.0, f32::NAN), None);
 }
