@@ -48,6 +48,7 @@ pub struct AlphaBetaVolts {
 ///
 /// 依赖 `i_a + i_b + i_c = 0`。三相和不为零时 β 会带上共模，那属于采样异常，
 /// 由 `gate` 判定，本函数不做补偿。
+#[inline]
 pub fn clarke(currents: PhaseCurrent) -> AlphaBeta {
     AlphaBeta {
         alpha_amps: currents.a_amps,
@@ -71,6 +72,7 @@ pub fn park(currents: AlphaBeta, theta_rad: f32) -> Dq {
 }
 
 /// 用已算好的 [`SinCos`] 做 Park；同一拍先算一次，Park/逆 Park 复用。
+#[inline]
 pub fn park_with(frame: SinCos, currents: AlphaBeta) -> Dq {
     Dq {
         d_amps: frame.cos * currents.alpha_amps + frame.sin * currents.beta_amps,
@@ -85,6 +87,7 @@ pub fn inverse_park(d_v: f32, q_v: f32, theta_rad: f32) -> AlphaBetaVolts {
 }
 
 /// 用已算好的 [`SinCos`] 做逆 Park；与 [`park_with`] 共用同一拍缓存。
+#[inline]
 pub fn inverse_park_with(frame: SinCos, d_v: f32, q_v: f32) -> AlphaBetaVolts {
     AlphaBetaVolts {
         alpha_v: frame.cos * d_v - frame.sin * q_v,
@@ -94,20 +97,27 @@ pub fn inverse_park_with(frame: SinCos, d_v: f32, q_v: f32) -> AlphaBetaVolts {
 
 /// 移植的抛物线近似：`|sin|` 与 `|cos|` 同时给出，最大绝对误差 0.002。
 ///
-/// 只做一次 `theta / 2π` 缩放；sin 复用 cos 的归约路径（`v − 0.25`）。
+/// 只做一次 `theta / 2π` 缩放，并且只做一次 `floor`：
+/// `cos` 的归约是 `v − 0.25 − floor(v + 0.25)`，`sin` 是 `v − 0.5 − floor(v)`；
+/// `floor(v + 0.25)` 由 `floor(v)` 与小数部分 `≥ 0.75` 直接得到。
+#[inline]
 pub fn sin_cos(theta_rad: f32) -> (f32, f32) {
     let v = theta_rad * (FRAC_1_PI / 2.0);
-    (sin_from_unit(v), cos_from_unit(v))
+    let base = floor_f32(v);
+    let cos_floor = if v - base >= 0.75 {
+        base + 1.0
+    } else {
+        base
+    };
+    (
+        cos_poly(v - 0.5 - base),
+        cos_poly(v - 0.25 - cos_floor),
+    )
 }
 
-/// `sin(x)`：`cos(x − π/2)` 在 `v = x/2π` 域上等价于 `v − 0.25`。
-fn sin_from_unit(v: f32) -> f32 {
-    cos_from_unit(v - 0.25)
-}
-
-/// 抛物线近似的 `cos`（源 `cos.rs`，`floor` 换成本地截断实现）。
-fn cos_from_unit(mut value: f32) -> f32 {
-    value -= 0.25 + floor_f32(value + 0.25);
+/// 归一化相位上的抛物线近似（源 `cos.rs` 的多项式部分）。
+#[inline]
+fn cos_poly(mut value: f32) -> f32 {
     value *= 16.0 * (value.abs() - 0.5);
     value + 0.225 * value * (value.abs() - 1.0)
 }

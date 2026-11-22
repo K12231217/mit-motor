@@ -242,7 +242,8 @@ Apache-2.0）与 `okhsunrog/oxifoc`（`svpwm`/`current_sense`，Apache-2.0），
 
 候选：把载波从 20 kHz 提到 40 kHz（半周期 12.5 µs，5 µs 窗口要求 `D_MAX ≤ 0.60`）→ **评估后回退 20 kHz**。
 依据（电机参数，2026-11-22 提供）：`Rs = 5.16 Ω`、`Ls = 2.38 mH`、`τ = L/R = 461 µs`；20 kHz 下电流纹波峰峰值约 **0.126 A**，远小于额定 0.9 A；额定 504 rpm、14 极对、最大空载 1028 rpm；24 V 母线在线性区（`D_MAX=0.80`）可用相电压幅值 **11.09 V**。即使按 40 kHz 的 8.31 V（`D_MAX=0.60`）也够用，但 40 kHz 对纹波/音频没有实质收益，反而多损失 25% 电压利用率 → 保持 **20 kHz（ARR=4250）**。
-- P0/P1 优化保留：CRC-6 64 项状态表、电压圆未饱和跳过 `sqrt`、Park/逆 Park 共用 `SinCos`、sincos 单次 `θ/2π` 缩放、PI 比例项复用、`normalize_volts_with_inv`。
+- P0/P1 优化保留：CRC-6 64 项状态表、电压圆未饱和跳过 `sqrt`、Park/逆 Park 共用 `SinCos`、sincos 单次 `θ/2π` 缩放 + 单次 `floor`、PI 比例项复用、`normalize_volts_with_inv`。
+- 跨 crate 内联：`Q15`、`sense::currents`、`foc` 变换、`svpwm`、`Pi`、`current_loop` 加 `#[inline]`；电压圆饱和分支移到 `#[cold]` 辅助函数，保持热路径直线。
 - P2 未落：CCM 放置需要 `1_bsp`/链接脚本；CORDIC 需要外设与 DWT 对比；SVPWM 定点化在 M4F 上收益不确定，保留 f32。
 
 失效条件：若实板 20 kHz 的纹波/音频不可接受，再评估 40 kHz，但必须先接受 `D_MAX ≤ 0.60` 的电压损失。

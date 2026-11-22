@@ -72,6 +72,7 @@ const TWO_BY_SQRT3: f32 = 2.0 * crate::foc::FRAC_1_SQRT3;
 ///
 /// 返回顺序 A/B/C，每个值夹在 `0..=max_duty`。`max_duty` 是定时器 ARR；
 /// 传入更小的值即可同时施加占空比上限（例如 `ARR × D_MAX`）。
+#[inline]
 pub fn space_vector_pwm(alpha: f32, beta: f32, max_duty: u16) -> [u16; 3] {
     let sector = get_sector(alpha, beta);
     let pwm_full = i32::from(max_duty);
@@ -140,6 +141,7 @@ pub fn normalize_volts(alpha_v: f32, beta_v: f32, vbus_v: f32) -> Option<(f32, f
 }
 
 /// 已缓存 `1/vbus` 时的归一化入口：20 kHz 环只做乘法，除法留在 1 kHz 慢任务。
+#[inline]
 pub fn normalize_volts_with_inv(alpha_v: f32, beta_v: f32, inv_vbus: f32) -> Option<(f32, f32)> {
     if inv_vbus <= 0.0 || !inv_vbus.is_finite() {
         return None;

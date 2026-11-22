@@ -49,6 +49,7 @@ impl Pi {
     /// 直接预置积分项，单位伏特（带速接管用）。
     ///
     /// 非有限值按 0 处理；这是积分器的唯一写入原语，`reset()` 与反算都走它。
+    #[inline]
     pub fn preload_v(&mut self, integral_v: f32) {
         self.integral_v = if integral_v.is_finite() {
             integral_v
@@ -65,6 +66,7 @@ impl Pi {
     }
 
     /// 已持有比例项时的反算入口：`integral = output − proportional`。
+    #[inline]
     pub fn back_calculate_integral_from_p(&mut self, output_v: f32, proportional_v: f32) {
         self.preload_v(output_v - proportional_v);
     }
@@ -76,6 +78,7 @@ impl Pi {
     }
 
     /// 与 [`Self::update`] 相同，但同时返回比例项，供外层反算积分器复用。
+    #[inline]
     pub fn update_with_p(
         &mut self,
         setpoint_a: f32,

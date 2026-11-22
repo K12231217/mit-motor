@@ -103,6 +103,7 @@ impl CurrentLoop {
     /// 控制律顺序固定：PI → 交叉解耦 → 反电势前馈 → 电压圆限幅 → 积分器反算。
     /// `omega_e_rad_s` 是电角速度（`[INFERENCE]` 由编码器/观测器提供），`vbus_v` 必须
     /// 为正且有限。输入非法时清零积分并返回零电压。
+    #[inline]
     pub fn current_loop(
         &mut self,
         i_dq: Dq,
@@ -139,12 +140,7 @@ impl CurrentLoop {
         let vq_v = if vq_unclamped * vq_unclamped <= remaining_v2 {
             vq_unclamped
         } else {
-            let max_vq = if remaining_v2 > 0.0 {
-                sqrt_f32(remaining_v2)
-            } else {
-                0.0
-            };
-            vq_unclamped.clamp(-max_vq, max_vq)
+            clamp_vq_saturated(vq_unclamped, remaining_v2)
         };
 
         // 反算到 PI 输出侧：总电压 = pi - dec_vd，或 pi + dec_vq + dec_bemf。
@@ -158,6 +154,18 @@ impl CurrentLoop {
             q_v: vq_v,
         }
     }
+}
+
+/// 饱和分支：只有 q 轴装不下时才进来，放在冷段避免污染热路径 I-cache。
+#[cold]
+#[inline(never)]
+fn clamp_vq_saturated(vq_unclamped: f32, remaining_v2: f32) -> f32 {
+    let max_vq = if remaining_v2 > 0.0 {
+        sqrt_f32(remaining_v2)
+    } else {
+        0.0
+    };
+    vq_unclamped.clamp(-max_vq, max_vq)
 }
 
 /// 入口唯一一次有限性检查。
