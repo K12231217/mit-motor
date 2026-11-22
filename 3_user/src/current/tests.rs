@@ -5,7 +5,7 @@ use crate::policy;
 use contracts::types::{DqTarget, DqVolts, MotorParams};
 
 const DT_S: f32 = 50e-6;
-const VBUS_V: f32 = 24.0;
+const VBUS_V: f32 = 48.0;
 const R_OHM: f32 = 0.1;
 const LD_H: f32 = 100e-6;
 const LQ_H: f32 = 150e-6;

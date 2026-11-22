@@ -10,8 +10,8 @@ pub const Q15_FULL_SCALE: f32 = 32_768.0;
 
 /// 有符号 Q1.15 定点数：`raw / 32768` 落在 `[-1.0, 0.99997]`。
 ///
-/// 用于调制量 `m = 2d - 1`，`d` 是高边占空比；`d = D_MAX = 0.80` 时 `m = 0.6`，
-/// 所以合法原始码限制在 `±0.6 · 32768`。
+/// 用于调制量 `m = 2d - 1`，`d` 是高边占空比；`d = D_MAX = 0.60` 时 `m = 0.2`，
+/// 所以合法原始码限制在 `±0.2 · 32768`。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Q15(i16);
@@ -77,7 +77,7 @@ pub const MODULATION_MAX: f32 = 2.0 * limits::hw::D_MAX - 1.0;
 
 /// [`MODULATION_MAX`] 的定点表示（四舍五入到最近的码），派生值，不引入新门限。
 ///
-/// `D_MAX = 0.80 ⇒ m = 0.6 ⇒ 0.6 × 32768 = 19660.8 → 19661`。它是
+/// `D_MAX = 0.60 ⇒ m = 0.2 ⇒ 0.2 × 32768 = 6553.6 → 6554`。它是
 /// [`ClampedModulation`] 的量化边界：`Q15::from_ratio(MODULATION_MAX)` 恰好落在
 /// 这一码上，所以"恰好等于 `D_MAX`"不会因为最后一个 LSB 的舍入被判超限，再大一个码
 /// 就算超限。
@@ -421,11 +421,11 @@ mod tests {
         }
     }
 
-    /// 边界：恰好 `D_MAX`（量化码 19661）合法，任一方向多一个 LSB 即构造失败。
+    /// 边界：恰好 `D_MAX`（量化码 6554）合法，任一方向多一个 LSB 即构造失败。
     #[test]
     fn clamped_modulation_boundary_matches_d_max() {
-        // 0.6 × 32768 = 19660.8 → 四舍五入 19661。
-        assert_eq!(MODULATION_MAX_RAW, 19_661);
+        // 0.2 × 32768 = 6553.6 → 四舍五入 6554。
+        assert_eq!(MODULATION_MAX_RAW, 6_554);
         let max = Q15::from_ratio(MODULATION_MAX);
         assert_eq!(max.raw(), MODULATION_MAX_RAW);
         assert_eq!(

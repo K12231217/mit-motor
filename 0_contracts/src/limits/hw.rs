@@ -5,7 +5,7 @@
 //! 矛盾钉成编译错误。门限、降额与容量预算不在这里：预算见 [`super::budget`]，策略见
 //! `user::policy`。
 
-use super::budget::ISR_PERIOD_US;
+use super::budget::PWM_CARRIER_HZ;
 
 /// 采样窗口下限，单位 ns。
 ///
@@ -15,17 +15,17 @@ use super::budget::ISR_PERIOD_US;
 /// ⇒ 5.0 µs。
 pub const SAMPLE_WINDOW_MIN_NS: u32 = 5_000;
 
-/// PWM 半周期，单位 ns（中心对齐 20 kHz，HR-302：ARR = 4250 @ 42.5 MHz）。
+/// PWM 半周期，单位 ns（中心对齐 40 kHz，HR-302：ARR = 2125 @ 170 MHz）。
 ///
-/// 中心对齐时一个 50 µs 周期有两次低边共导窗口，各占半个周期。
-pub const PWM_HALF_PERIOD_NS: u32 = ISR_PERIOD_US * 1_000 / 2;
+/// 中心对齐时一个 25 µs 载波周期有两次低边共导窗口；控制环每 2 个载波周期采样一次。
+pub const PWM_HALF_PERIOD_NS: u32 = 1_000_000_000 / (2 * PWM_CARRIER_HZ);
 
 /// 高边占空比上限。
 ///
-/// 由 [`SAMPLE_WINDOW_MIN_NS`] 反推：`1 - 5.0/25 = 0.80`（半周期 25 µs）。HR-305 的
-/// 3 µs / 90 % 是同一约束的下限版本，这里取更严的值。超过它，半周期内留给低边采样
-/// 的窗口不足 5 µs。
-pub const D_MAX: f32 = 0.80;
+/// 由 [`SAMPLE_WINDOW_MIN_NS`] 反推：`1 - 5.0/12.5 = 0.60`（半周期 12.5 µs）。
+/// 超过它，半周期内留给低边采样的窗口不足 5 µs。40 kHz 载波把电压利用率上限从
+/// 0.80 压到 0.60，这是提高载波频率的直接代价。
+pub const D_MAX: f32 = 0.60;
 
 /// 电流采样对（ADC1/2 与 ADC3/4）的固定偏斜上限，单位 ns。
 ///
@@ -130,17 +130,17 @@ const _: () = assert!(ADC_MIDSCALE_CODE * 2.0 == ADC_FULL_SCALE_CODE);
 
 // `D_MAX` 的千分位镜像：const 上下文里 f32 不能转整数，一致性检查必须走整数算术
 // （避免 f32 抽奖）。
-const D_MAX_PERMILLE: u32 = 800;
+const D_MAX_PERMILLE: u32 = 600;
 
 // 硬约束：半周期减去高边占用后必须仍容得下采样窗口。
-// `25_000 × (1000 - 800) = 5_000_000 ≥ 1000 × 5_000`。
+// `12_500 × (1000 - 600) = 5_000_000 ≥ 1000 × 5_000`。
 const _: () = assert!(PWM_HALF_PERIOD_NS * (1000 - D_MAX_PERMILLE) >= 1000 * SAMPLE_WINDOW_MIN_NS);
 
-// 镜像常量自己也得钉在 `D_MAX` 上：`[0.800, 0.801)` 内才算同一数值。
+// 镜像常量自己也得钉在 `D_MAX` 上：`[0.600, 0.601)` 内才算同一数值。
 const _: () = assert!(
     D_MAX >= D_MAX_PERMILLE as f32 / 1000.0 && D_MAX < (D_MAX_PERMILLE + 1) as f32 / 1000.0
 );
-const _: () = assert!(PWM_HALF_PERIOD_NS * 2 == ISR_PERIOD_US * 1_000);
+const _: () = assert!(PWM_HALF_PERIOD_NS * 2 * PWM_CARRIER_HZ == 1_000_000_000);
 
 const _: () = assert!(ENC_FRAME_BITS == ENC_ANGLE_BITS + ENC_MAG_BITS + ENC_CRC_BITS);
 const _: () = assert!(ENC_COUNTS_PER_REV == 1 << ENC_ANGLE_BITS);

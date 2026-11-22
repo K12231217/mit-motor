@@ -117,19 +117,16 @@ impl CurrentLoop {
         }
 
         let max_v_mag = MAX_VOLTS_PER_VBUS * vbus_v;
-        let error_d_amps = target.d_amps - i_dq.d_amps;
-        let error_q_amps = target.q_amps - i_dq.q_amps;
-
-        let vd_pi = self.pi_d.update(target.d_amps, i_dq.d_amps, dt_s);
-        let vq_pi = self.pi_q.update(target.q_amps, i_dq.q_amps, dt_s);
+        let pi_d = self.pi_d.update_with_p(target.d_amps, i_dq.d_amps, dt_s);
+        let pi_q = self.pi_q.update_with_p(target.q_amps, i_dq.q_amps, dt_s);
 
         // 与 VESC 同号：vd -= iq·ωe·Lq，vq += id·ωe·Ld + ωe·ψm。
         let dec_vd = i_dq.q_amps * omega_e_rad_s * self.params.lq_h;
         let dec_vq = i_dq.d_amps * omega_e_rad_s * self.params.ld_h;
         let dec_bemf = omega_e_rad_s * self.params.flux_wb;
 
-        let vd_unclamped = vd_pi - dec_vd;
-        let vq_unclamped = vq_pi + dec_vq + dec_bemf;
+        let vd_unclamped = pi_d.voltage_v - dec_vd;
+        let vq_unclamped = pi_q.voltage_v + dec_vq + dec_bemf;
         if !vd_unclamped.is_finite() || !vq_unclamped.is_finite() {
             self.reset();
             return DqVolts::ZERO;
@@ -138,18 +135,23 @@ impl CurrentLoop {
         // d 轴优先：先把 vd 夹到 max_v_mag，再用剩余长度夹 vq。
         let vd_v = vd_unclamped.clamp(-max_v_mag, max_v_mag);
         let remaining_v2 = max_v_mag * max_v_mag - vd_v * vd_v;
-        let max_vq = if remaining_v2 > 0.0 {
-            sqrt_f32(remaining_v2)
+        // 线性区（多数拍）不调 sqrt：q 轴装得下就原样通过。
+        let vq_v = if vq_unclamped * vq_unclamped <= remaining_v2 {
+            vq_unclamped
         } else {
-            0.0
+            let max_vq = if remaining_v2 > 0.0 {
+                sqrt_f32(remaining_v2)
+            } else {
+                0.0
+            };
+            vq_unclamped.clamp(-max_vq, max_vq)
         };
-        let vq_v = vq_unclamped.clamp(-max_vq, max_vq);
 
         // 反算到 PI 输出侧：总电压 = pi - dec_vd，或 pi + dec_vq + dec_bemf。
         self.pi_d
-            .back_calculate_integral(vd_v + dec_vd, error_d_amps);
+            .back_calculate_integral_from_p(vd_v + dec_vd, pi_d.proportional_v);
         self.pi_q
-            .back_calculate_integral(vq_v - dec_vq - dec_bemf, error_q_amps);
+            .back_calculate_integral_from_p(vq_v - dec_vq - dec_bemf, pi_q.proportional_v);
 
         DqVolts {
             d_v: vd_v,

@@ -110,13 +110,13 @@ tools/
 | 2 | `telemetry` | USART3 / USB | 1 ms | 剩余预算 |
 | 1 | `calib` | 软件定时 | 10 ms | 剩余预算 |
 
-时间基准：HSE 16 MHz → PLL（M=4, N=85, R=2）→ **170 MHz**，需开 boost 模式。20 kHz center-aligned → `ARR = 4250`，50 µs = 8500 周期。
+时间基准：HSE 16 MHz → PLL（M=4, N=85, R=2）→ **170 MHz**，需开 boost 模式。40 kHz center-aligned 载波 → `ARR = 2125`（25 µs = 4250 周期）；20 kHz 控制环每 2 个载波周期采样一次，50 µs = 8500 周期。
 
 ## 6. 数据流
 
 ```mermaid
 flowchart TD
-    T1[TIM1 20 kHz<br/>center-aligned<br/>TRGO2] -->|硬触发| ADC[ADC1/2/3<br/>同步转换]
+    T1[TIM1 40 kHz<br/>center-aligned<br/>TRGO2] -->|硬触发| ADC[ADC1/2/3<br/>同步转换]
     ADC --> DMA[3 路 DMA]
     DMA -->|EOC| LOOP[current_loop<br/>prio 5]
     SPI[(SPI1 · MT6701 E1)] -->|循环内阻塞读 24 bit| LOOP

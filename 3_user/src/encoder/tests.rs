@@ -325,3 +325,18 @@ fn jump_beyond_scaled_bound_latches() {
         Health::Latched(Fault::Jump)
     );
 }
+
+#[test]
+fn crc6_table_matches_bitwise_over_all_payloads() {
+    // 2^18 个载荷全跑：合法码字必须通过，翻 1 bit 必须被拒。
+    for payload in 0..(1u32 << 18) {
+        let crc = u32::from(crc6(payload));
+        let word = (payload << hw::ENC_CRC_BITS) | crc;
+        let [_, hi, mid, lo] = word.to_be_bytes();
+        assert!(parse([hi, mid, lo]).is_ok(), "payload = {payload}");
+
+        let flipped = word ^ (1 << 5);
+        let [_, hi, mid, lo] = flipped.to_be_bytes();
+        assert!(parse([hi, mid, lo]).is_err(), "payload = {payload}");
+    }
+}

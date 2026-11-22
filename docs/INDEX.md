@@ -14,7 +14,7 @@
 | 驱动 | **MP6540HA**（`MP6540HGU-A-Z`），HS/LS 六电平输入，**无内部死区、无 EN 脚** | `docs/architecture.md` §2.2 |
 | 电流采样 | SOx 比例 1/9200；4.99k/4.99k 偏置 → 0.2712 V/A，2.97 mA/LSB；三路独立 ADC | `docs/hardware-requirements.md` HR-203/HR-201 |
 | 时钟 | HSE 16 M → PLL M=4/N=85/R=2 ⇒ **170 MHz**（boost）；ADC 42.5 MHz；**无 48 MHz/USB 支路**（板载 USB 已砍，见 §1 已拍定口径） | HR-301/303（HR-304 的 USB 时钟已不实现，见 §4 落差 9） |
-| PWM | TIM1 中心对齐 **20 kHz**，ARR=4250，死区由 BDTR 产生 | HR-302 |
+| PWM | TIM1 中心对齐 **40 kHz 载波**（ARR=2125）；20 kHz 控制环每 2 个载波周期采样一次；死区由 BDTR 产生 | HR-302 |
 | 工具链 | `nightly-2025-11-05-x86_64-pc-windows-gnu`（本机无 MSVC）；`thumbv7em-none-eabihf` | `rust-toolchain.toml` |
 | 实测 rustc | 1.93.0-nightly (f15a7f385 2025-11-04) | `rustc --version`，2026-11-15 |
 | 构建入口 | `cargo xtask <cmd>`（`check/build/rel/fmt/fmt-check/clippy/test/size/flash/rtt/arch/hygiene/tier/help`），唯一实现 `xtask/src/main.rs`；IDE 与 CI 只调它 | `.cargo/config.toml`、`xtask/src/main.rs` 的 `help()` |
@@ -26,7 +26,7 @@
 | 门控定版 | 四维结构门 `R ≥ 0.995`、`d ≥ 0.01`、`z ≤ 0.02`、`pred ≤ 0.9·0.5 pp`；`χ²(2) ≤ 9.21` **只在结构门之后**算；`z=\|A0\|·√3/√(G·A1)`、`G=200`、`λ=1−1/2000`、`N_eq ≤ 3999`；**组窗隔离**：200 拍独立累加、组内不写主窗口，结构门 + 组内前后半窗 χ² + 跨组 χ² 全过才并入并刷新生效增益，`pred` 只决定能否发布 | 实现 `3_user/src/gate.rs`（`GateParams`/`GainGate`）与 `gate/accum.rs`（`GainAccum`、私有 `GroupWindow`/`HalfWindow`、两级 χ²）、`gate/math.rs`（无 libm 数值）；数值唯一来源：器件/电气在 `0_contracts/src/limits/hw.rs`、时序容量在 `limits/budget.rs`、策略阈值在 `3_user/src/policy.rs`（三者已分离，`limits/mod.rs` 汇总；两处不许互抄数值）。已数值否定、禁止复活（离线实验，脚本未入仓）：`d` 当跨工况阈值（实测反序，见 AGENTS §4-8）、`λ_min ≥ 135` 这类常数（应现算）、TLS（低幅区本应被门控拒） |
 | 算法层内容 | `3_user/src/`：`gate.rs` + `gate/accum.rs` + `gate/math.rs`（状态机 / 正规方程与 χ² / 无 libm 数学；阈值与公式见「门控定版」）、`encoder.rs` + `encoder/{frame,monitor}.rs`（MT6701 帧布局与 CRC / 四方接受判据、丢失拍数放宽与两帧去抖）、`fsm.rs`（状态 × 事件迁移矩阵，纯 `const fn`，按 `state × event × record_valid` 全表穷举；类型在 `contracts/src/fsm.rs`）、`policy.rs`（策略参数：门限/降额/盲推窗口/SPI 分频/清故障窗口，只引用 `contracts::limits` 派生）、`foc.rs`（Clarke/Park/逆 Park + 无 libm 正余弦）、`svpwm.rs`（几何扇区 SVPWM → 比较值）、`sense.rs`（原始码 → 安培）、`pid.rs`（条件积分抗饱和；这四个模块移植自 Apache-2.0 上游，见 ADR-12）；两个 crate 无 `todo!()`，测试条数以 `cargo xtask test` 为准 | `ls 3_user/src/gate 3_user/src/encoder`；`grep -rn 'todo!' 0_contracts/src 3_user/src` 为空 |
 | 电流环与监督 | `3_user/src/current.rs`：dq 电流环（PI + 交叉解耦 + BEMF 前馈 + d 优先电压圆）；`3_user/src/supervisor.rs`：任务心跳 1 ms / 命令超时 20 ms、锁存需 `clear`；`GainGate::set_zero_lsb` 增加 C0 零位合理性（中点 ±512 LSB） | ADR-13；测试 `3_user/src/{current,supervisor}/tests.rs`、`gate/tests.rs` |
-| 已拍定口径 | `D_MAX=0.80`；编码器 SPI **10.625 MHz**；故障动作 **coast**（台架不带重力负载）；**标定档案落 bank 2 双槽**（布局见 ADR-09；写入路径随 `1_bsp` 建）；**砍板载 USB**（上位机走 CAN FD） | `0_contracts/src/limits/hw.rs` 的 `D_MAX` 与 `CALIB_SLOT_*`、`3_user/src/policy.rs` 的 `ENC_SPI_HZ`；其余为 2026-11-16 用户裁定，代码落点未建（未验证） |
+| 已拍定口径 | `D_MAX=0.60`（40 kHz 载波 + 5 µs 窗口）；编码器 SPI **10.625 MHz**；故障动作 **coast**（台架不带重力负载）；**标定档案落 bank 2 双槽**（布局见 ADR-09；写入路径随 `1_bsp` 建）；**砍板载 USB**（上位机走 CAN FD） | `0_contracts/src/limits/hw.rs` 的 `D_MAX` 与 `CALIB_SLOT_*`、`3_user/src/policy.rs` 的 `ENC_SPI_HZ`；其余为 2026-11-16 用户裁定，代码落点未建（未验证） |
 | 冻结脚手架 commit | `ab1634798e56034f332ec33b1359ea1b23dc4b4e`（T-001 冻结点；仅 xtask/CI/CLion 配置，无业务代码）。T-002 已改动工作区，当前 HEAD **未复核** | `git rev-parse HEAD`（未跑） |
 | 任务书字段 | 专业 = **自动化**；任务书原文"轨道交通信号与控制"是笔误（2026-11-16 老师确认） | 2026-11-16 老师定案。**不得**据此推断答辩委员会的关注点 |
 | 硬件现状 | **无 G474RBT6 实板**；PCB14 载 G491RET6，缺 HR §1.3 的 12 项实验设施 | `docs/agent-readiness.md` §1 |
@@ -139,7 +139,7 @@ I4–I6 因缺 `4_app` 暂无检查实现。
 候选（故障表示）：位掩码 `FaultFlags`、**单码 `FaultCode`（首个故障胜出）** → 选单码。
 理由：线上故障字段只有 8 bit 且语义是"一个码"，掩码无处安放；单码还保住了"最先出事的那个"。
 候选（制动）：新增 `Duty::Brake`（下三管常通）、**暂不提供，故障与停机一律 coast** → 选后者。
-理由：`Duty` 的 `Pwm` 调制量由 `ClampedModulation` 在类型层锁在 `|m| ≤ 0.6`（`D_MAX = 0.80` 为保 ≥5 µs 低边采样窗），
+理由：`Duty` 的 `Pwm` 调制量由 `ClampedModulation` 在类型层锁在 `|m| ≤ 0.2`（`D_MAX = 0.60` 为保 ≥5 µs 低边采样窗），
 制动是 `m = -1`，必须新增第三变体并决定"待机时制动还是自由停车"的硬件策略；台架不带重力负载，
 现在没有需要制动的场景，先不做。`LoopAction` 因此只有 `Coast`/`OpenLoop`/`Current`。
 候选（标定档案）：不存（每次上电自校准）、**bank 2 内 A/B 双槽，各 2 页（4 KB）** → 选后者。
@@ -238,6 +238,18 @@ Apache-2.0）与 `okhsunrog/oxifoc`（`svpwm`/`current_sense`，Apache-2.0），
   零位被 ±512 LSB 误杀；或扇区轴附近 SVM 先于电压圆夹紧导致跟踪不足（改 `D_MAX` 时必须同步
   复核 `current.rs` 的圆半径）。
 
+### ADR-14 40 kHz 载波 + 20 kHz 控制 + 热路径 P0/P1（已定，2026-11-22）
+
+候选：保持 20 kHz 载波（ARR 4250，`D_MAX=0.80`）；**40 kHz 载波、20 kHz 控制（每 2 个载波周期采样一次），`D_MAX` 降到 0.60** → 选后者。
+理由：载波翻倍把电流纹波与音频噪声推到更高频；控制环仍是 20 kHz，PI/观测器参数不变。
+代价：半周期从 25 µs 降到 12.5 µs，5 µs 采样窗口要求 `D_MAX ≤ 0.60`，电压利用率从 0.80 降到 0.60（可用矢量上限降 25%）；`ARR=2125`。
+- 采样触发：TIM1_TRGO2 每 2 个载波更新触发一次注入组；控制 ISR 仍 50 µs（`budget::CONTROL_DECIMATION=2`）。
+- P0：CRC-6 改 64 项状态表（3 次查表替代 18 次逐位）；电压圆未饱和跳过 `sqrt`；Park/逆 Park 共用 `SinCos`。
+- P1：sincos 只做一次 `θ/2π` 缩放；PI 返回比例项供积分器反算复用；新增 `normalize_volts_with_inv`，允许 1 kHz 慢任务缓存 `1/vbus`。
+- P2 未落：CCM 放置需要 `1_bsp`/链接脚本；CORDIC 需要外设与 DWT 对比；SVPWM 定点化在 M4F 上收益不确定，先保留 f32。
+
+失效条件：实板 40 kHz 下 ADC 窗口/EMI 不达标；或 0.60 占空比不足以覆盖最高转速（需回退 20 kHz 或提高母线电压）。
+
 ## 4. 文档 vs 代码树：已确认的落差
 
 | # | 文档说 | 树里实际 | 后果 / 处理 |
@@ -249,7 +261,7 @@ Apache-2.0）与 `okhsunrog/oxifoc`（`svpwm`/`current_sense`，Apache-2.0），
 | 5 | `board.yaml` / `self_test` / `tools/replay`（`agent-readiness.md` §2 A–D） | **均不存在** | agent 可判定性缺口未闭合 |
 | 6 | `hardware-requirements.md` §9 的 `64,632 / 16,080 B` | 实测镜像 17,768 B（另一工具链测量） | 违反 PRE-09，待删或改指针 |
 | 7 | `hardware-requirements.md` §1 原写 SRAM = SRAM1 80 K + SRAM2 32 K + CCM 16 K | DS12288 §3.5：SRAM1 80 K + SRAM2 16 K + CCM 32 K；`memory.x` 链接 96 K（SRAM1+SRAM2），CCM 声明未链接 | 已按一手手册改正 HR 与 `memory.x` 注释；SRAM2/CCM 的旧写法是笔误，两者对调后总和仍 128 K。CCM 的 `0x2001_8000` SBUS 别名是否启用属独立改动（§5-4） |
-| 8 | HR-305 写占空比上限 `d ≤ 90 %` | `0_contracts/src/limits/hw.rs` 的 `D_MAX = 0.80` | 已裁：0.90 在 50 µs 周期下只剩 2.5 µs 共导窗口，低于 HR-305 自己要求的 3 µs；以 `hw.rs` 为准，HR-305 待改 |
+| 8 | HR-305 写占空比上限 `d ≤ 90 %` | `0_contracts/src/limits/hw.rs` 的 `D_MAX = 0.60` | 已裁：40 kHz 载波半周期 12.5 µs，保 5 µs 窗口要求 `D_MAX ≤ 0.60`；HR-305 已同步改为 60 % |
 | 9 | HR-304 要求 USB 时钟 HSI48+CRS | 板载 USB 已砍（§1 已拍定口径），固件无 USB 路径 | 此处无代码可查（`firmware/` 仍是 `blinky` 模板）；HR-304 待标废弃或删 |
 | 10 | `architecture.md` §2.3 说三路 SOx"无采样时刻偏斜" | 跨 dual 对（ADC1/2 ↔ ADC3/4）无硬件同步通路；固定偏斜按 ≤ 50 ns 补偿（`limits/hw.rs` 的 `ADC_PAIR_SKEW_MAX_NS`） | "跨组零偏斜"已证伪（§6 映射 2）；`architecture.md` §2.3 待改 |
 | 11 | `architecture.md` §2.2 写 R7/R8 = 2 kΩ/2 kΩ → 7.4 mA/LSB | HR-203 与 `hw.rs` 用 4.99 kΩ/4.99 kΩ → 0.2712 V/A、2.97 mA/LSB；`gate` 测试也按 2.97 构造数据 | 以 HR-203 与 `hw.rs`（`SOX_AMPS_PER_LSB` 由此派生）为准；§2.2 待改，改前不得引用其标度 |
@@ -270,7 +282,7 @@ Apache-2.0）与 `okhsunrog/oxifoc`（`svpwm`/`current_sense`，Apache-2.0），
 | 任务书重点问题 | 本仓产出 | 证据位置 |
 |---|---|---|
 | 1. 总体方案与硬件实现 | V2 板需求 HR-1xx…8xx、引脚表、MP6540HA 行为核对 | `docs/hardware-requirements.md` §2/§3；`docs/architecture.md` §2（均为文档，无代码断言） |
-| 2. 与 PWM 同步的低边采样时序 | ADC 双对（ADC1/2、ADC3/4）方案；`D_MAX=0.80` 时窗口 **5 µs**（2 µs 建立 + 2.18 µs 采样 + 余量）；**"跨组零偏斜"已证伪**：跨 dual 对无硬件同步通路，固定偏斜按 ≤ 50 ns 补偿 | `0_contracts/src/limits/hw.rs`（`D_MAX`、`SAMPLE_WINDOW_MIN_NS`、`ADC_PAIR_SKEW_MAX_NS`，附编译期断言 `PWM_HALF_PERIOD_NS × (1000 − D_MAX_PERMILLE) ≥ 1000 × SAMPLE_WINDOW_MIN_NS`）；`docs/architecture.md` §2.3；补偿落点 `1_bsp/src/adc.rs`（**未建**，无代码可查） |
+| 2. 与 PWM 同步的低边采样时序 | ADC 双对（ADC1/2、ADC3/4）方案；40 kHz 载波、`D_MAX=0.60` 时窗口 **5 µs**（2 µs 建立 + 2.18 µs 采样 + 余量）；**"跨组零偏斜"已证伪**：跨 dual 对无硬件同步通路，固定偏斜按 ≤ 50 ns 补偿 | `0_contracts/src/limits/hw.rs`（`D_MAX`、`SAMPLE_WINDOW_MIN_NS`、`ADC_PAIR_SKEW_MAX_NS`，附编译期断言 `PWM_HALF_PERIOD_NS × (1000 − D_MAX_PERMILLE) ≥ 1000 × SAMPLE_WINDOW_MIN_NS`）；`docs/architecture.md` §2.3；补偿落点 `1_bsp/src/adc.rs`（**未建**，无代码可查） |
 | 3. 零和约束下相对增益自校准 | λ-RLS 信息形式、2 个自由参数、可辨识性边界、`N_eq = 3999`、幅值参考 0.14 A / 0.55 A | `3_user/src/policy.rs`（`R_MAX`…`TARGET_PP`、`N_EQ_MAX`）、`3_user/src/gate.rs`；断言 `cargo xtask test`（gate 用例：`pred` 降额边际、`N_eq` 计算、三相等权 `s_rms`） |
 | 4. 测量异常在线检测与故障安全 | 四维门 + χ²、锁存语义、MT6701 四方接受判据、coast 动作、状态 × 事件矩阵（未标定禁闭环、运行中禁切标定/禁提交档案、无窗口禁清故障） | `3_user/src/gate.rs`、`3_user/src/encoder.rs`、`3_user/src/fsm.rs`；断言 `cargo xtask test`（CRC 24 bit 逐位翻转、全 0 帧护栏、丢失窗口锁存、矩阵全表穷举）、`cargo xtask arch` 的 I7 |
 
