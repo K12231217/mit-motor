@@ -103,3 +103,36 @@ pub enum Frame { Command(Cmd), Feedback(Feedback), Trace(TraceChunk) }
 
 > 未采用的候选：`qff233/FOC` 的 `license` 字段为 `null`，按 `open-source-reuse.md` 不复制源码；
 > `gulitsky/reactance` 为 `NOASSERTION`，同样只做结构参考。
+
+## 9. 本地参考源码（`docs/ref/`，不进仓）
+
+`docs/ref/` 已在 `.gitignore` 排除（上游代码不是本仓产物）。2026-11-22 拉取，供实现不确定时查一手代码：
+
+| 目录 | 上游 | 版本 | 许可 | 本地形态 |
+|---|---|---|---|---|
+| `docs/ref/bldc` | `vedderb/bldc` | `6fda11c2`（2026-11-21），`FW_VERSION 7.01` / beta 1 | GPL-3.0 | 完整 clone（含历史），356 MB |
+| `docs/ref/vesc_tool` | `vedderb/vesc_tool` | `04614bf5`（2026-11-21） | GPL-3.0 | `--depth 1` 浅克隆 |
+
+> 首次拉取的 `vesc_tool` 是坏的（`HEAD → refs/heads/.invalid`，零有效对象），已原地修复为重拉；
+> 其 `.git/objects/pack/tmp_pack_kIpUBq` 被外部进程锁定无法删除（48 MB 垃圾），不影响读取。
+
+**入口文件（按问题查，不通读）**：
+
+| 问题 | 看哪里 |
+|---|---|
+| 外设/定时器映射 | `bldc/main.c` 顶部注释；`bldc/hwconf/` |
+| FOC 主循环、观测器、保护 | `bldc/motor/mcpwm_foc.c`（`control_current`、`observer_update`、`pll_run`、`do_dc_cal`）|
+| 变换与 SVM | `bldc/motor/foc_math.c` |
+| 统一控制 API / 状态机 | `bldc/motor/mc_interface.c`、`bldc/datatypes.h` |
+| CAN 帧格式 | `bldc/documentation/comm_can.md`、`bldc/comm/comm_can.c` |
+| 参数辨识 | `bldc/motor/mcpwm_foc.c` 的 detect 段 |
+| 上位机页面与参数定义 | `vesc_tool/pages/page{motor,foc,bldc,motorsettings}.*`、`vesc_tool/configparams.cpp`、`vesc_tool/commands.cpp` |
+
+**使用红线**：
+
+1. **许可是分发问题，不是阅读问题**。毕设私有阶段（不对外分发）GPL-3.0 不触发源码开放义务，
+   参考、改写算法均可用；但仓库一旦公开或随板交付，传染性生效——届时须区分「参考实现」与「搬入代码」。
+   §8 的移植白名单依旧只登记 Apache-2.0 / MIT，避免以后公开时说不清来源。
+2. **版本是 dev 分支**：本地为 7.01 beta，网上 6.x 文章的参数名与界面可能对不上；以本地 commit 为准。
+3. **RTOS 假设不迁移**：bldc 跑 ChibiOS，中断内浮点、DMA 半传输等隐含假设进 RTIC 全部失效（§4）。
+4. 只借**结构 / 阈值 / 时序**；数值仍以 `0_contracts/src/limits/` 与器件手册为准（PRE-07）。

@@ -25,6 +25,7 @@
 | 门禁基线 | `test` / `check` / `fmt-check` / `clippy`（firmware + 根 workspace）/ `rel` / `size` / `arch`（= I1/I2/I3/I7）/ `hygiene`（H2/H4/H5）全 PASS；`tier`（H3）按基线分支判定，Tier B 无 HIL 即 FAIL（均为 `cargo xtask <cmd>`；数字以各命令输出为准） | 2026-11-21 实测 |
 | 门控定版 | 四维结构门 `R ≥ 0.995`、`d ≥ 0.01`、`z ≤ 0.02`、`pred ≤ 0.9·0.5 pp`；`χ²(2) ≤ 9.21` **只在结构门之后**算；`z=\|A0\|·√3/√(G·A1)`、`G=200`、`λ=1−1/2000`、`N_eq ≤ 3999`；**组窗隔离**：200 拍独立累加、组内不写主窗口，结构门 + 组内前后半窗 χ² + 跨组 χ² 全过才并入并刷新生效增益，`pred` 只决定能否发布 | 实现 `3_user/src/gate.rs`（`GateParams`/`GainGate`）与 `gate/accum.rs`（`GainAccum`、私有 `GroupWindow`/`HalfWindow`、两级 χ²）、`gate/math.rs`（无 libm 数值）；数值唯一来源：器件/电气在 `0_contracts/src/limits/hw.rs`、时序容量在 `limits/budget.rs`、策略阈值在 `3_user/src/policy.rs`（三者已分离，`limits/mod.rs` 汇总；两处不许互抄数值）。已数值否定、禁止复活（离线实验，脚本未入仓）：`d` 当跨工况阈值（实测反序，见 AGENTS §4-8）、`λ_min ≥ 135` 这类常数（应现算）、TLS（低幅区本应被门控拒） |
 | 算法层内容 | `3_user/src/`：`gate.rs` + `gate/accum.rs` + `gate/math.rs`（状态机 / 正规方程与 χ² / 无 libm 数学；阈值与公式见「门控定版」）、`encoder.rs` + `encoder/{frame,monitor}.rs`（MT6701 帧布局与 CRC / 四方接受判据、丢失拍数放宽与两帧去抖）、`fsm.rs`（状态 × 事件迁移矩阵，纯 `const fn`，按 `state × event × record_valid` 全表穷举；类型在 `contracts/src/fsm.rs`）、`policy.rs`（策略参数：门限/降额/盲推窗口/SPI 分频/清故障窗口，只引用 `contracts::limits` 派生）、`foc.rs`（Clarke/Park/逆 Park + 无 libm 正余弦）、`svpwm.rs`（几何扇区 SVPWM → 比较值）、`sense.rs`（原始码 → 安培）、`pid.rs`（条件积分抗饱和；这四个模块移植自 Apache-2.0 上游，见 ADR-12）；两个 crate 无 `todo!()`，测试条数以 `cargo xtask test` 为准 | `ls 3_user/src/gate 3_user/src/encoder`；`grep -rn 'todo!' 0_contracts/src 3_user/src` 为空 |
+| 电流环与监督 | `3_user/src/current.rs`：dq 电流环（PI + 交叉解耦 + BEMF 前馈 + d 优先电压圆）；`3_user/src/supervisor.rs`：任务心跳 1 ms / 命令超时 20 ms、锁存需 `clear`；`GainGate::set_zero_lsb` 增加 C0 零位合理性（中点 ±512 LSB） | ADR-13；测试 `3_user/src/{current,supervisor}/tests.rs`、`gate/tests.rs` |
 | 已拍定口径 | `D_MAX=0.80`；编码器 SPI **10.625 MHz**；故障动作 **coast**（台架不带重力负载）；**标定档案落 bank 2 双槽**（布局见 ADR-09；写入路径随 `1_bsp` 建）；**砍板载 USB**（上位机走 CAN FD） | `0_contracts/src/limits/hw.rs` 的 `D_MAX` 与 `CALIB_SLOT_*`、`3_user/src/policy.rs` 的 `ENC_SPI_HZ`；其余为 2026-11-16 用户裁定，代码落点未建（未验证） |
 | 冻结脚手架 commit | `ab1634798e56034f332ec33b1359ea1b23dc4b4e`（T-001 冻结点；仅 xtask/CI/CLion 配置，无业务代码）。T-002 已改动工作区，当前 HEAD **未复核** | `git rev-parse HEAD`（未跑） |
 | 任务书字段 | 专业 = **自动化**；任务书原文"轨道交通信号与控制"是笔误（2026-11-16 老师确认） | 2026-11-16 老师定案。**不得**据此推断答辩委员会的关注点 |
@@ -212,6 +213,27 @@ Apache-2.0）与 `okhsunrog/oxifoc`（`svpwm`/`current_sense`，Apache-2.0），
 - 失效条件：上游改为 copyleft 许可（当前 Apache-2.0/MIT）；或 `3_user` 为三角/开方引入
   `libm`/`cordic` 依赖（ADR-06 的零依赖前提）；或实板发现 SVPWM 输出不满足低边采样窗口
   （需回到 `D_MAX` 夹紧点，见 `software-architecture.md` §2 的 `pid.rs`/`svpwm.rs` 注释）。
+
+### ADR-13 电流环 + 独立监督 + C0 零位闸门（已定，2026-11-22）
+
+候选：照搬 VESC 的 `vd/vq` 全局状态、PI 与 `fault_stop_thread`；**只移植控制律与状态边界，
+状态显式传入** → 选后者。
+- 电流环：`3_user/src/current.rs`。`kp_d=Ld·BW`、`kp_q=Lq·BW`、`ki=R·BW`，叠加交叉解耦与
+  BEMF 前馈；最终边界做 d 优先电压圆，`VOLTAGE_MARGIN=hw::D_MAX`，不引入 `overmod_factor`。
+  `MotorParams` 由离线实测提供（ADR-13 本期不做在线辨识），类型在 `contracts::types`。
+- 抗饱和/带速接管：`Pi::preload_v` 是积分器唯一写入原语；限幅后 `back_calculate_integral`
+  反算；`CurrentLoop::preload_from_measured` 由实测 `vd/vq` 扣回解耦项后预置。
+- 独立监督：`3_user/src/supervisor.rs`。任务窗口 1 ms（20 拍），命令窗口 20 ms
+  （`budget::CAN_TIMEOUT_MS`），严格 `>` 判定；首故障锁存，`clear(now_us)` 才解锁；
+  映射 `AdcTimeout` / `CommTimeout`，不新增线协议码。
+- C0 零位：`GainGate::set_zero_lsb` 拒绝非有限或偏离中点超过 `ZERO_OFFSET_TOL_LSB=512`
+  的零位，且不覆盖上一份有效标定；拒绝时 `trust=UntrustedBias`。
+
+代价：`omega_e` 与实测 `vd/vq` 由应用层提供；电压圆与 `svpwm` 逐相夹紧的配合、1 ms 任务窗口
+与 512 LSB 零位门限均无 HIL 数据。
+- 失效条件：实板出现任务窗口误报（按 DWT 实测调 `SUPERVISOR_TASK_STALL_US`）；正常 MP6540
+  零位被 ±512 LSB 误杀；或扇区轴附近 SVM 先于电压圆夹紧导致跟踪不足（改 `D_MAX` 时必须同步
+  复核 `current.rs` 的圆半径）。
 
 ## 4. 文档 vs 代码树：已确认的落差
 

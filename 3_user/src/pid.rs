@@ -37,6 +37,24 @@ impl Pi {
         self.integral_v
     }
 
+    /// 直接预置积分项，单位伏特（带速接管用）。
+    ///
+    /// 非有限值按 0 处理；这是积分器的唯一写入原语，`reset()` 与反算都走它。
+    pub fn preload_v(&mut self, integral_v: f32) {
+        self.integral_v = if integral_v.is_finite() {
+            integral_v
+        } else {
+            0.0
+        };
+    }
+
+    /// 按最终输出反算积分项：`integral = output − kp·error`。
+    ///
+    /// 外层做电压圆限幅后调用，保证积分器与最终输出一致。
+    pub fn back_calculate_integral(&mut self, output_v: f32, error_a: f32) {
+        self.preload_v(output_v - self.kp_v_per_a * error_a);
+    }
+
     /// 一拍更新：`u = kp·(r − y) + ∫ki·(r − y)·dt`，输出夹在 `±limit_v`。
     pub fn update(&mut self, setpoint_a: f32, measurement_a: f32, dt_s: f32) -> f32 {
         let error_amps = setpoint_a - measurement_a;

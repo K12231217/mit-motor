@@ -70,7 +70,7 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/policy.rs         #   策略参数：门限/降额/盲推窗口/清故障窗口 [已实现]
   src/gate.rs           #   四维结构门 + χ² 与发布判据 [已实现]
   src/gate/accum.rs     #   正规方程累加器、组窗/半窗两级 χ² [已实现]
-  src/gate/math.rs      #   无 libm 数值（sqrt_f32 等）[已实现]
+  src/gate/math.rs      #   闸门专用常量与判据辅助 [已实现]
   src/gate/tests.rs     #   门控回归测试 [已实现]
   src/encoder.rs        #   MT6701 门面：帧解析 + 监控器 [已实现]
   src/encoder/frame.rs  #   24 bit 帧、CRC-6、状态位、全 0 护栏 [已实现]
@@ -84,6 +84,11 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/sense/tests.rs    #   零位、单码标度、通道顺序 [已实现]
   src/pid.rs            #   电流环 PI（条件积分抗饱和）[已实现，移植 calebfletcher/foc + 本地限幅]
   src/pid/tests.rs      #   比例、积分收敛、抗饱和 [已实现]
+  src/current.rs        #   dq 电流环：PI + 解耦 + BEMF + d 优先电压圆 [已实现]
+  src/current/tests.rs  #   一阶 RL、电压圆、d 优先、NaN 兜底、接管预置 [已实现]
+  src/supervisor.rs     #   任务心跳 + 命令超时，纯状态机，锁存需显式清除 [已实现]
+  src/supervisor/tests.rs # 窗口边界、任务停摆、锁存不复位 [已实现]
+  src/math.rs           #   共享无 libm 原语（sqrt_f32 / SQRT3）[已实现]
   # calib.rs / safety.rs 不另建：相对增益估计与可信性判据已在 gate.rs（ADR-12）
 
 4_app/                  # 装配（包名 app，bin）
@@ -220,6 +225,14 @@ impl Board {
 | TIM1 / ADC1-3 / DMA1 / PWM GPIO | **只有 bsp 碰**，走裸寄存器 | 20 kHz 热路径，不许经过 HAL 的动态检查 |
 | FDCAN2 / USART3 / USB FS / SPI1 | 只有 bsp 碰，内部用 embassy-stm32/embassy-usb | 冷路径，不值得手写 |
 | RCC / PWR | embassy 配，bsp **读回校验** | 时钟树只能一个主人 |
+
+两条不可协商的硬件契约（寄存器级，`init()` 必须逐条读回校验）：
+
+- **`TIM1_BDTR.AOE = 0`**：BKIN 触发硬件清 MOE 后，禁止下一个更新事件自动恢复出力；
+  故障后只能由显式清故障流程重新使能。
+- **电流采样路径**：三相电流走 ADC1/2/3 注入组，由 **TIM1_TRGO** 同步触发；单一 JEOS
+  中断一次性读取三路 JDR1，并给三路样本打同一个 `RawSample3.tick`（`contracts::types`）。
+  跨 ADC、跨中断拼出的样本一律判无效。
 
 `src/lib.rs` 顶部必须写死这段注释，并在 `init()` 里运行：
 

@@ -6,8 +6,8 @@ use self::test_support::{
     gate, measured, push, raw, Lcg, Rot, ARC_STEP_COS, ARC_STEP_SIN, FULL_STEP_COS, FULL_STEP_SIN,
 };
 use super::accum::{GainAccum, HalfWindow};
-use super::math::SQRT3;
 use super::{GainGate, GateParams};
+use crate::math::SQRT3;
 use crate::policy;
 use contracts::Trust;
 
@@ -338,7 +338,7 @@ fn step_returns_none_until_zero_is_set() {
     assert_eq!(gate.accum.weight, 0.0);
     assert_eq!(gate.group.accum.weight, 0.0);
 
-    gate.set_zero_lsb([2_048.0, 2_044.0, 2_051.0]);
+    assert!(gate.set_zero_lsb([2_048.0, 2_044.0, 2_051.0]));
     let _ = gate.step(raw(s), true);
     // 首组未满：历史累加器不得被提前修改，样本只能在组窗里。
     assert_eq!(gate.accum.weight, 0.0);
@@ -473,6 +473,40 @@ fn invalid_samples_above_limit_force_previous_gain() {
     assert_eq!(gate.accum.weight, weight);
 }
 
+#[test]
+fn zero_offsets_near_midscale_are_accepted() {
+    let mut gate = GainGate::new(GateParams::FROZEN);
+    assert!(gate.set_zero_lsb([2_048.0, 2_040.0, 2_060.0]));
+    assert!(gate.zero_valid);
+    assert_eq!(gate.zero_lsb, [2_048.0, 2_040.0, 2_060.0]);
+}
+
+#[test]
+fn railed_or_non_finite_zero_offsets_are_rejected() {
+    let mut gate = GainGate::new(GateParams::FROZEN);
+    assert!(!gate.set_zero_lsb([0.0, 2_048.0, 2_048.0]));
+    assert!(!gate.zero_valid);
+    assert_eq!(gate.trust(), Trust::UntrustedBias);
+
+    assert!(!gate.set_zero_lsb([4_095.0, 2_048.0, 2_048.0]));
+    assert!(!gate.set_zero_lsb([f32::NAN, 2_048.0, 2_048.0]));
+    assert!(!gate.set_zero_lsb([
+        2_048.0 + policy::ZERO_OFFSET_TOL_LSB + 1.0,
+        2_048.0,
+        2_048.0
+    ]));
+    assert!(!gate.zero_valid);
+}
+
+#[test]
+fn rejected_zero_does_not_overwrite_the_previous_calibration() {
+    let mut gate = GainGate::new(GateParams::FROZEN);
+    assert!(gate.set_zero_lsb([2_048.0, 2_044.0, 2_051.0]));
+    assert!(!gate.set_zero_lsb([0.0, 0.0, 0.0]));
+    assert!(gate.zero_valid);
+    assert_eq!(gate.zero_lsb, [2_048.0, 2_044.0, 2_051.0]);
+}
+
 // 固定种子 LCG 与三相旋转发生器，不引入 rand；只服务本文件。
 mod test_support {
     use super::super::math::ADC_MIDSCALE_CODE;
@@ -481,7 +515,7 @@ mod test_support {
 
     pub(super) fn gate() -> GainGate {
         let mut gate = GainGate::new(GateParams::FROZEN);
-        gate.set_zero_lsb([ADC_MIDSCALE_CODE; 3]);
+        assert!(gate.set_zero_lsb([ADC_MIDSCALE_CODE; 3]));
         gate
     }
 

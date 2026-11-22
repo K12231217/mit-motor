@@ -6,6 +6,8 @@
 //!   观测，闸门是参数可辨识性的前提（PRE-05）。
 //! - [`encoder`]：MT6701 24 bit 帧解析、CRC-6、状态位、全 0 护栏、跳变判据与
 //!   去抖。`1_bsp` 只搬字节，判据是纯函数与纯状态机，host 可测。
+//! - [`current`]：dq 电流环，PI + 交叉解耦 + 反电势前馈 + d 轴优先电压圆限幅。
+//! - [`supervisor`]：任务心跳与命令超时的独立监督，纯状态机，锁存后需显式清除。
 //! - [`fsm`]：状态 × 事件迁移矩阵。纯函数、无时钟；调用方只许调用 [`step`]，不许自己
 //!   判断"能不能切"。未标定闭环、运行中切标定、无窗口清故障都在这里被拒。
 //! - [`foc`]：Clarke / Park 与逆变换，以及无 libm 的正余弦。幅值不变约定。
@@ -30,6 +32,9 @@
     clippy::doc_lazy_continuation
 )]
 
+pub(crate) mod math;
+
+pub mod current;
 pub mod encoder;
 pub mod foc;
 pub mod fsm;
@@ -37,8 +42,10 @@ pub mod gate;
 pub mod pid;
 pub mod policy;
 pub mod sense;
+pub mod supervisor;
 pub mod svpwm;
 
+pub use crate::current::CurrentLoop;
 pub use crate::encoder::{
     angle_rad, jump_limit_lsb, parse, AngleOutcome, EncoderMonitor, EncoderParams, Fault, Frame,
     FrameError, Health,

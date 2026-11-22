@@ -16,8 +16,9 @@
 | T-006 | B | 规范：驱动所有权 move 移交、enum 静态分发、热路径校验边界与零隐式 panic | 事实见 `docs/INDEX.md` §3 ADR-10、`AGENTS.md` §1.1 MECH-01…04 | **DONE**（纯文档；门禁见 §2） |
 | T-007 | B | 协作协议落地：H1–H5 硬门禁（`hygiene` / `tier` / clippy 双 workspace）、S1–S3 软协议、`docs/agent-guardrails.md` | 无业务代码；决策见 `docs/INDEX.md` §3 ADR-11 | **DONE**（host 侧；`tier` 对 Tier B 按设计 FAIL） |
 | T-008 | B | 可脱离实板的信号链：`foc` / `svpwm` / `sense` / `pid`（移植 Apache-2.0 上游） | 无契约变更；来源与改动见 `docs/INDEX.md` §3 ADR-12、`docs/reference-implementations.md` §8 | **DONE**（host 侧；`calib`/`safety` 并入 `gate`，不另建） |
+| T-009 | B | 电流环契约与纯函数（PR1/2）、独立监督（PR4）、带速接管（PR3）、C0 零位合理性（PR5） | 事实与证据见 `docs/INDEX.md` §1「电流环与监督」、§3 ADR-13 | **DONE**（host 侧；无 HIL） |
 
-## 2. 本会话验收门（T-002 + T-003 + T-005 + T-006）
+## 2. 历史验收门记录
 
 2026-11-16 实测，命令原文输出摘要：
 
@@ -46,6 +47,12 @@ T-008（2026-11-21，信号链移植，命令原文输出摘要）：
 - [x] `cargo xtask clippy`：firmware 与根 workspace（`--workspace --all-targets`）两遍均 `Finished`，exit 0
 - [x] `cargo xtask hygiene`：`PASS H2/H5/H4`（32 个文件），exit 0
 - [x] `cargo xtask fmt-check` / `check` / `doc` / `arch` / `size`：全 PASS；`flash image 17,768 B (27.1 %)`，exit 0
+
+T-009（2026-11-22，电流环 + 独立监督 + C0 零位闸门，命令原文输出摘要）：
+- [x] `cargo xtask test`：`33 passed`（contracts）+ `83 passed`（user，含新增 11 条），4 条 `test result` 均 0 failed，exit 0
+- [x] `cargo xtask check` / `fmt-check` / `doc`：全 PASS，exit 0
+- [x] `cargo xtask clippy`：firmware 与根 workspace 两遍均 `Finished`，exit 0
+- [x] `cargo xtask arch`：`PASS I1/I2/I3/I7` + `arch_check: PASS —— I1/I2/I3/I7 全部通过`，exit 0
 
 ## 3. 最近一次台架实测（HIL）
 

@@ -11,6 +11,37 @@
 use contracts::limits::budget;
 use contracts::limits::hw;
 
+/// 电流环闭环带宽，单位 rad/s。
+///
+/// 与 VESC `conf_general_calc_apply_foc_cc_kp_ki_gain()` 的 `tc` 同义：增益取
+/// `kp_d = Ld·BW`、`kp_q = Lq·BW`、`ki = R·BW`。1 000 rad/s 对应 `tc = 1 ms`，
+/// 是 VESC 电机检测流程的常用整定值。
+pub const CURRENT_BW_RAD_S: f32 = 1_000.0;
+
+/// 电压矢量上限系数：`max_v_mag = VOLTAGE_MARGIN · vbus / √3`。
+///
+/// 取 `hw::D_MAX`，与 `svpwm` 的逐相占空比上限同源（VESC 公式里的 `max_duty`）。
+/// 不引入过调制：`overmod_factor ≡ 1`；SVM 仍独立执行逐相比较值夹紧。
+pub const VOLTAGE_MARGIN: f32 = hw::D_MAX;
+
+/// 监督者判定任务停摆的窗口，单位 µs：20 个电流环周期（1 ms）。
+///
+/// 取 20 拍是为了吸收 ISR 抖动与一次标定组窗的瞬时占用，同时远小于通信看门狗
+/// （20 ms）：任务真的停摆时，先由这里锁存，而不是等整机复位。
+pub const SUPERVISOR_TASK_STALL_US: u32 = 20 * budget::ISR_PERIOD_US;
+
+/// C0 零位相对 ADC 中点的允许偏差，单位 LSB。
+///
+/// 这是“卡轨/接错”的粗判据，不是标定精度指标：±512 LSB ≈ ±0.41 V（±1.5 A），
+/// 足以抓住 0、满量程、通道短路，又宽于 MP6540HA 的零位散布。真实零位误差由
+/// [`DO_LSB_HALF_WIDTH`] 计入 `pred`。
+pub const ZERO_OFFSET_TOL_LSB: f32 = 512.0;
+
+const _: () = assert!(CURRENT_BW_RAD_S > 0.0);
+const _: () = assert!(VOLTAGE_MARGIN > 0.0 && VOLTAGE_MARGIN <= 1.0);
+const _: () = assert!(SUPERVISOR_TASK_STALL_US > budget::ISR_PERIOD_US);
+const _: () = assert!(ZERO_OFFSET_TOL_LSB > 0.0 && ZERO_OFFSET_TOL_LSB < hw::ADC_MIDSCALE_CODE);
+
 /// 方向覆盖门限：`R = |mean(unit current vector)|`，低于它判激励不足。
 ///
 /// 依据：残差对共模增益完全盲（三相同比例放大时 `i_a + i_b + i_c` 仍为 0，回归只能

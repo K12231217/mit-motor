@@ -16,7 +16,8 @@ mod tests;
 pub use self::accum::GainAccum;
 
 use self::accum::{chi2_between, cross_group_chi2, GroupWindow};
-use self::math::{do2_from_half_width, powi_f32, sqrt_f32, ADC_MIDSCALE_CODE};
+use self::math::{do2_from_half_width, powi_f32, ADC_MIDSCALE_CODE};
+use crate::math::sqrt_f32;
 use crate::policy;
 use contracts::types::RawSample3;
 use contracts::Trust;
@@ -128,9 +129,25 @@ impl GainGate {
     }
 
     /// 设置减零位用的逐相零位码（C0 测量结果，LSB），并置零位有效位。
-    pub fn set_zero_lsb(&mut self, zero_lsb: [f32; 3]) {
+    ///
+    /// 逐相必须有限且落在 ADC 中点 ±[`policy::ZERO_OFFSET_TOL_LSB`] 内；否则保持原值、
+    /// 把 `trust` 降为 `UntrustedBias` 并返回 `false`。卡在 0/满量程或通道短路不能
+    /// 当成一份标定结果。
+    #[must_use = "零位超出合理性窗口时必须按标定失败处理"]
+    pub fn set_zero_lsb(&mut self, zero_lsb: [f32; 3]) -> bool {
+        let midscale = contracts::limits::hw::ADC_MIDSCALE_CODE;
+        let tol = policy::ZERO_OFFSET_TOL_LSB;
+        let plausible = zero_lsb
+            .iter()
+            .all(|offset| offset.is_finite() && (*offset - midscale).abs() <= tol);
+        if !plausible {
+            self.trust = Trust::UntrustedBias;
+            return false;
+        }
+
         self.zero_lsb = zero_lsb;
         self.zero_valid = true;
+        true
     }
 
     /// 设置零位标定的误差半宽 `h`（单位 LSB），刷新 `δo² = (2h)²/12`。

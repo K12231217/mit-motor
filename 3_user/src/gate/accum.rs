@@ -3,7 +3,8 @@
 //! 模型 `y = φᵀθ`：`φ = [s_b, s_c]`、`y = -s_a`、`θ = [γ_b, γ_c]`；全部量是减零位后的
 //! ADC LSB（码），闸门内部不做安培换算。共模增益不可观测，因此未知量只有两个相对增益。
 
-use super::math::{sqrt_f32, DET_EPS, SQRT3};
+use super::math::DET_EPS;
+use crate::math::{sqrt_f32, SQRT3};
 use crate::policy;
 
 /// 相对增益正规方程累加器。

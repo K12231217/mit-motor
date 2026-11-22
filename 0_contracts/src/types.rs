@@ -206,6 +206,55 @@ pub struct DqTarget {
     pub q_amps: f32,
 }
 
+/// 电机本体参数，单位进字段名（PRE-06）。
+///
+/// 本期不做在线辨识：数值由离线 LCR 表/示波器实测后，经标定或应用层配置传入。
+/// 类型放这里只为跨 crate 传递；取值策略不在这里。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct MotorParams {
+    /// 定子相电阻，欧姆。
+    pub r_ohm: f32,
+    /// d 轴电感，亨利。
+    pub ld_h: f32,
+    /// q 轴电感，亨利。
+    pub lq_h: f32,
+    /// 永磁磁链，韦伯。
+    pub flux_wb: f32,
+}
+
+impl MotorParams {
+    /// 是否可用于电流环：全部有限，且 `R > 0`、`Ld > 0`、`Lq > 0`、`ψ ≥ 0`。
+    pub fn is_valid(&self) -> bool {
+        self.r_ohm.is_finite()
+            && self.ld_h.is_finite()
+            && self.lq_h.is_finite()
+            && self.flux_wb.is_finite()
+            && self.r_ohm > 0.0
+            && self.ld_h > 0.0
+            && self.lq_h > 0.0
+            && self.flux_wb >= 0.0
+    }
+}
+
+/// dq 电压指令，单位伏特；电流环输出、逆 Park 之前的一站。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct DqVolts {
+    /// d 轴电压，伏特。
+    pub d_v: f32,
+    /// q 轴电压，伏特。
+    pub q_v: f32,
+}
+
+impl DqVolts {
+    /// 零电压指令（安全兜底）。
+    pub const ZERO: Self = Self {
+        d_v: 0.0,
+        q_v: 0.0,
+    };
+}
+
 /// 运行模式。
 ///
 /// 编号必须与 `docs/hardware-requirements.md` §6 的状态字 bit0–3 一致。
@@ -322,6 +371,14 @@ const _: () = assert!(core::mem::size_of::<PhaseCurrent>() == 12);
 const _: () = assert!(core::mem::size_of::<DqTarget>() == 8);
 const _: () = assert!(core::mem::offset_of!(DqTarget, d_amps) == 0);
 const _: () = assert!(core::mem::offset_of!(DqTarget, q_amps) == 4);
+const _: () = assert!(core::mem::size_of::<MotorParams>() == 16);
+const _: () = assert!(core::mem::offset_of!(MotorParams, r_ohm) == 0);
+const _: () = assert!(core::mem::offset_of!(MotorParams, ld_h) == 4);
+const _: () = assert!(core::mem::offset_of!(MotorParams, lq_h) == 8);
+const _: () = assert!(core::mem::offset_of!(MotorParams, flux_wb) == 12);
+const _: () = assert!(core::mem::size_of::<DqVolts>() == 8);
+const _: () = assert!(core::mem::offset_of!(DqVolts, d_v) == 0);
+const _: () = assert!(core::mem::offset_of!(DqVolts, q_v) == 4);
 const _: () = assert!(core::mem::size_of::<Mode>() == 1);
 const _: () = assert!(core::mem::size_of::<CalibStep>() == 1);
 const _: () = assert!(MODULATION_MAX < 1.0);
