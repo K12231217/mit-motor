@@ -228,6 +228,9 @@ Apache-2.0）与 `okhsunrog/oxifoc`（`svpwm`/`current_sense`，Apache-2.0），
   映射 `AdcTimeout` / `CommTimeout`，不新增线协议码。
 - C0 零位：`GainGate::set_zero_lsb` 拒绝非有限或偏离中点超过 `ZERO_OFFSET_TOL_LSB=512`
   的零位，且不覆盖上一份有效标定；拒绝时 `trust=UntrustedBias`。
+- 热路径除法：电压圆改用 `MAX_VOLTS_PER_VBUS = VOLTAGE_MARGIN/√3` 常量乘；`sqrt_f32`
+  改为逆平方根牛顿（纯乘法 3 次，无除法）。VESC `6fda11c` 的 sincos 是多项式而非查表
+  （`util/utils_math.c:319`），故本期不引入 LUT，是否值得查表留待 DWT 实测。
 
 代价：`omega_e` 与实测 `vd/vq` 由应用层提供；电压圆与 `svpwm` 逐相夹紧的配合、1 ms 任务窗口
 与 512 LSB 零位门限均无 HIL 数据。

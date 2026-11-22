@@ -17,9 +17,12 @@
 use contracts::types::{DqTarget, DqVolts, MotorParams};
 
 use crate::foc::Dq;
-use crate::math::{sqrt_f32, SQRT3};
+use crate::math::{sqrt_f32, INV_SQRT3};
 use crate::pid::Pi;
 use crate::policy;
+
+/// `max_v_mag / vbus`：编译期折成常数，逐拍只剩一次乘法。
+const MAX_VOLTS_PER_VBUS: f32 = policy::VOLTAGE_MARGIN * INV_SQRT3;
 
 /// 一台电机的 dq 电流环状态。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -113,7 +116,7 @@ impl CurrentLoop {
             return DqVolts::ZERO;
         }
 
-        let max_v_mag = policy::VOLTAGE_MARGIN * vbus_v / SQRT3;
+        let max_v_mag = MAX_VOLTS_PER_VBUS * vbus_v;
         let error_d_amps = target.d_amps - i_dq.d_amps;
         let error_q_amps = target.q_amps - i_dq.q_amps;
 

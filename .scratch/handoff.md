@@ -49,7 +49,7 @@ T-008（2026-11-21，信号链移植，命令原文输出摘要）：
 - [x] `cargo xtask fmt-check` / `check` / `doc` / `arch` / `size`：全 PASS；`flash image 17,768 B (27.1 %)`，exit 0
 
 T-009（2026-11-22，电流环 + 独立监督 + C0 零位闸门，命令原文输出摘要）：
-- [x] `cargo xtask test`：`33 passed`（contracts）+ `83 passed`（user，含新增 11 条），4 条 `test result` 均 0 failed，exit 0
+- [x] `cargo xtask test`：`33 passed`（contracts）+ `85 passed`（user，含新增 13 条），4 条 `test result` 均 0 failed，exit 0
 - [x] `cargo xtask check` / `fmt-check` / `doc`：全 PASS，exit 0
 - [x] `cargo xtask clippy`：firmware 与根 workspace 两遍均 `Finished`，exit 0
 - [x] `cargo xtask arch`：`PASS I1/I2/I3/I7` + `arch_check: PASS —— I1/I2/I3/I7 全部通过`，exit 0
