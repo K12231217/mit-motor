@@ -10,14 +10,6 @@ pub const CURRENT_LOOP_HZ: u32 = 20_000;
 /// ISR 周期，单位 µs（1 / 20 kHz）。
 pub const ISR_PERIOD_US: u32 = 50;
 
-/// PWM 载波频率，单位 Hz（HR-302：TIM1 中心对齐 40 kHz）。
-///
-/// 控制环仍是 20 kHz：每 [`CONTROL_DECIMATION`] 个载波周期触发一次注入组采样。
-pub const PWM_CARRIER_HZ: u32 = 40_000;
-
-/// 控制环对载波的抽取比：40 kHz / 20 kHz = 2。
-pub const CONTROL_DECIMATION: u32 = 2;
-
 /// ISR 时间预算，单位 µs。
 ///
 /// 预算含快照发布（< 0.5 µs）；DWT 实测值进遥测。
@@ -53,8 +45,6 @@ pub const SNAPSHOT_RETRY_MAX: u8 = 4;
 // 编译期自检：预算内部必须自洽。
 const _: () = assert!(CURRENT_LOOP_HZ == 1_000_000 / ISR_PERIOD_US);
 const _: () = assert!(ISR_BUDGET_US < ISR_PERIOD_US);
-const _: () = assert!(PWM_CARRIER_HZ == CURRENT_LOOP_HZ * CONTROL_DECIMATION);
-const _: () = assert!(1_000_000_000 % PWM_CARRIER_HZ == 0);
 const _: () = assert!(CMD_Q.is_power_of_two());
 const _: () = assert!(EVT_Q.is_power_of_two());
 const _: () = assert!(TRC_Q.is_power_of_two());

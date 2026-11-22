@@ -17,7 +17,7 @@
 | T-007 | B | 协作协议落地：H1–H5 硬门禁（`hygiene` / `tier` / clippy 双 workspace）、S1–S3 软协议、`docs/agent-guardrails.md` | 无业务代码；决策见 `docs/INDEX.md` §3 ADR-11 | **DONE**（host 侧；`tier` 对 Tier B 按设计 FAIL） |
 | T-008 | B | 可脱离实板的信号链：`foc` / `svpwm` / `sense` / `pid`（移植 Apache-2.0 上游） | 无契约变更；来源与改动见 `docs/INDEX.md` §3 ADR-12、`docs/reference-implementations.md` §8 | **DONE**（host 侧；`calib`/`safety` 并入 `gate`，不另建） |
 | T-009 | B | 电流环契约与纯函数（PR1/2）、独立监督（PR4）、带速接管（PR3）、C0 零位合理性（PR5） | 事实与证据见 `docs/INDEX.md` §1「电流环与监督」、§3 ADR-13 | **DONE**（host 侧；无 HIL） |
-| T-010 | B | 40 kHz 载波 + 20 kHz 控制；P0/P1 热路径优化（CRC 表、跳过 sqrt、SinCos 复用、PI 比例项复用、1/vbus 缓存） | 事实与证据见 `docs/INDEX.md` §3 ADR-14 | **DONE**（host 侧）；P2（CCM/CORDIC/定点）未落 |
+| T-010 | B | 40 kHz 载波评估后回退 20 kHz；P0/P1 热路径优化（CRC 表、跳过 sqrt、SinCos 复用、PI 比例项复用、1/vbus 缓存） | 事实与证据见 `docs/INDEX.md` §3 ADR-14 | **DONE**（host 侧）；P2（CCM/CORDIC/定点）未落 |
 
 ## 2. 历史验收门记录
 
