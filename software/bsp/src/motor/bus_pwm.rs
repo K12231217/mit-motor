@@ -196,7 +196,8 @@ impl Pwm {
         // 手动复位时 5V/驱动状态可能更慢，最多等 100 ms。仍低才判故障，
         // 避免把正常的驱动唤醒当成 nFAULT。
         for _ in 0..10 {
-            cortex_m::asm::delay(SYS_CLK_HZ / 1_000);
+            // ~10 ms per iteration at the observed 3-cycle delay loop.
+            cortex_m::asm::delay(SYS_CLK_HZ / 300);
             if !self.n_fault.is_low() {
                 return Ok(());
             }
