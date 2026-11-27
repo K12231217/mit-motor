@@ -32,3 +32,6 @@ __pycache__/
 /software/contracts/target/
 /software/bsp/target/
 /software/firmware/target/
+
+# 本地探针配置与日志（mcu.py / embeddedskills 技能产物）
+/.embeddedskills/

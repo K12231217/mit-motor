@@ -7,7 +7,7 @@
 
 | ID | 模式 | 目标 | 冻结/基线 | 状态 |
 |---|---|---|---|---|
-| T-012 | B | `bsp` clock + pwm：HSE 16M/PLL 170M 读回；TIM1 20 kHz/500 ns；按 2026-11-27 网表 nSLEEP PC7、nFAULT PC8、无 BKIN | `4f67b32`（T-011 脚手架） | **IMPLEMENTED / PENDING_HIL**：`rel/size/arch/clippy/hygiene` 已过；`main` 只读回、不 `enable`；硬件过压 break 缺口待补 |
+| T-012 | B | `bsp` clock + pwm：HSE 16M/PLL 170M 读回；TIM1 20 kHz/500 ns；按 2026-11-27 网表 nSLEEP PC7、nFAULT PC8、无 BKIN | `4f67b32`（T-011 脚手架） | **HIL: PASS（safe-off）**：RTT `clock=ok`、`pwm=ok arr=4250 dtg=85 moe/aoe/bke=false`；`enable` 波形与 LA 未做；硬件过压 break 缺口待补 |
 
 ## 2. 当前工作区
 
@@ -19,13 +19,15 @@
 
 ## 3. HIL
 
-**无 HIL 数据。** 板为 G474RBT6；尚未烧写、未跑 S0–S5、无示波器/LA 记录。
+HIL: PASS 2026-11-27 T-012 clock/PWM 安全关断态（无电机、电源 OVP 开、未 `enable`）
 
-下一次台架（T-012）：
-1. 烧 `software/firmware/src/bin/main.rs`；RTT 出现 `clock=ok`、`pwm=ok arr=4250 dtg=85 moe=false aoe=false bke=false`。
-2. 安全关断态：HS PA8/9/10、LS PB13/14/15 全低；nSLEEP PC7 低；nFAULT PC8 高。
-3. 不接电机、KA3005P 限流；临时 `enable` 后测 50 µs 周期、约 500 ns 死区，测完 `disable`。
-4. 台架结论只在本节新增 `HIL: PASS` 行；没有记录就是 `PENDING_HIL`。
+- 探针：J-Link V9.8 PLUS；`probe-rs download --verify` 成功；reset 后 RTT：
+  - `clock=ok (HSE 16M / PLL 170M)`；RCC 日志 `sys=170 MHz`、`adc=42.5 MHz`。
+  - `owner=ok (Board moved into Local)`。
+  - `pwm=ok arr=4250 dtg=85 moe=false aoe=false bke=false nfault=false`。
+- 未做：`enable` 后的 20 kHz/500 ns 波形、死区 LA、T-013 ADC/OPAMP。
+- 已知坑：`embassy-stm32 0.1.0` 的 `ADC1::frequency()` 在 `adc12sel=PLL1_P` 时 `unwrap` 了
+  `pll1_p`（RCC 日志为 `None`）；T-012 已移除 ADC 采样，T-013 必须绕过/修正。
 
 ## 4. 待裁决（人）
 

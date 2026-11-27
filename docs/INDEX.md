@@ -18,7 +18,7 @@
 | 工具链 | `nightly-2025-11-05-x86_64-pc-windows-gnu` + `thumbv7em-none-eabihf` |
 | 构建 | `cargo xtask <cmd>`，唯一实现 `software/xtask/src/main.rs` |
 | workspace | 根 workspace = `software/contracts` + `software/algorithms`；`software/firmware`/`bsp`/`xtask` 独立 |
-| 当前状态 | `software/bsp` clock/pwm 已实现并接入 `software/firmware/src/bin/main.rs`；adc/encoder/dwt 仍 `todo!()`；无 HIL 数据 |
+| 当前状态 | `software/bsp` clock/pwm 已实现；T-012 safe-off **HIL PASS**（170 MHz、ARR=4250、DTG=85、MOE/AOE/BKE=false）；adc/encoder/dwt 仍 `todo!()`；`enable` 波形/LA 未做 |
 
 > 测试数、镜像大小、门禁结果不写死：跑 `cargo xtask test` / `size` / `arch` / `hygiene`，以命令输出为准。
 

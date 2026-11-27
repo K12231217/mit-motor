@@ -1,23 +1,22 @@
-//! S0 bring-up: 170 MHz clock readback, driver ownership, PWM safe-off, one ADC sample.
+//! S0 bring-up: 170 MHz clock readback, driver ownership, PWM safe-off.
 //!
-//! This is **not** the motor application and it is **not** a HIL-verified result.
-//! It compiles for `thumbv7em-none-eabihf`; the checks below only become evidence
-//! when the same binary runs on a G474RBT6 board and the RTT log shows
-//! `clock=ok pwm=ok sample=...`.
+//! This is **not** the motor application and it is **not** a full HIL result.
+//! It compiles for `thumbv7em-none-eabihf`; the checks below become evidence when
+//! the binary runs on a G474RBT6 board and RTT shows `clock=ok pwm=ok`.
 //!
-//! 1. Clock: `bsp::motor::service_clock::config()` selects HSE 16 MHz → PLL 170 MHz
-//!    (ADC PLLP/8 = 42.5 MHz). The firmware reads the tree back and halts on mismatch
-//!    instead of continuing silently (PRE-05).
+//! 1. Clock: `service_clock::config()` selects HSE 16 MHz → PLL 170 MHz
+//!    (ADC PLLP/8 = 42.5 MHz). The firmware reads the tree back and halts on
+//!    mismatch instead of continuing silently (PRE-05).
 //! 2. Ownership: `Board` is constructed in `init` and moved into RTIC `Local`.
-//!    ADC, PWM and the pins have exactly one owner; no `static mut`, no `Option`
+//!    PWM and the pins have exactly one owner; no `static mut`, no `Option`
 //!    take in the hot path (MECH-01).
-//! 3. PWM: TIM1 is configured at 20 kHz center-aligned with 500 ns dead time,
-//!    `AOE = 0`, `MOE = 0`, `nSLEEP` low. The task only reads back `PwmState`;
-//!    it never calls `enable`, so no gate output is generated.
-//! 4. Sampling: one regular conversion on PA3 (VBUS, 100k/8.06k divider). The
-//!    20 kHz injected group belongs to `bsp`, not here.
+//! 3. PWM: TIM1 20 kHz center-aligned, 500 ns dead time, `AOE = 0`, `MOE = 0`,
+//!    `nSLEEP` low, `BKE = 0` (latest netlist has no TIM1_BKIN). The task only
+//!    reads back `PwmState`; it never calls `enable`, so no gate output.
 //!
-//! The LED is only a heartbeat: it tells a human the binary reached the task.
+//! ADC is intentionally absent: `embassy-stm32` 0.1.0's `ADC1::frequency()`
+//! unwraps `pll1_p`, which the G4 RCC leaves `None` when `adc12sel = PLL1_P`.
+//! The ADC injected group belongs to `bus_adc` (T-013), not this probe.
 
 #![deny(unsafe_code)]
 #![deny(warnings)]
@@ -26,11 +25,8 @@
 
 use bsp::motor::bus_pwm::{Pwm, PwmPins};
 use bsp::motor::service_clock;
-use cortex_m::asm::delay as cycle_delay;
-use embassy_stm32::adc::Adc;
 use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_stm32::peripherals::{ADC1, PA3, PB2};
-use embedded_hal::blocking::delay::DelayUs;
+use embassy_stm32::peripherals::PB2;
 use rtic::app;
 use rtic_monotonics::systick::prelude::*;
 use {defmt_rtt as _, panic_probe as _};
@@ -44,24 +40,8 @@ pub mod pac {
 
 /// One owner for every resource this probe touches.
 struct Board {
-    adc: Adc<'static, ADC1>,
-    vbus: PA3,
     led: Output<'static, PB2>,
     pwm: Pwm,
-}
-
-/// ADC driver needs a `DelayUs<u16>`. At 170 MHz, one microsecond is 170 cycles.
-struct Delay;
-
-impl DelayUs<u16> for Delay {
-    fn delay_us(&mut self, us: u16) {
-        cycle_delay(u32::from(us) * 170);
-    }
-}
-
-/// VBUS divider: (100k + 8.06k) / 8.06k = 13.4, VREF = 3.3 V, 12-bit ADC.
-fn vbus_mv(raw: u16) -> u32 {
-    u32::from(raw) * 3_300 * 134 / (4_096 * 10)
 }
 
 #[app(device = pac, peripherals = false, dispatchers = [USART1])]
@@ -90,8 +70,6 @@ mod app {
         }
         defmt::info!("clock=ok (HSE 16M / PLL 170M)");
 
-        let mut delay = Delay;
-        let adc = Adc::new(p.ADC1, &mut delay);
         let pwm = Pwm::init(
             p.TIM1,
             PwmPins {
@@ -107,14 +85,11 @@ mod app {
         );
 
         let board = Board {
-            adc,
-            vbus: p.PA3,
             led: Output::new(p.PB2, Level::High, Speed::Low),
             pwm,
         };
 
-        // The only place the Board is moved: into RTIC's Local resource. The
-        // task below borrows it; no other code can name the ADC, PWM or pins.
+        // The only place the Board is moved: into RTIC's Local resource.
         bringup::spawn().ok();
         (Shared {}, Local { board })
     }
@@ -134,11 +109,6 @@ mod app {
             pwm.bke,
             pwm.nfault
         );
-
-        // One blocking regular conversion. v4 ADC calibrates on `Adc::new`.
-        let raw = board.adc.read(&mut board.vbus);
-        let mv = vbus_mv(raw);
-        defmt::info!("sample=ok raw={} vbus_mv={}", raw, mv);
 
         // Heartbeat: high for ~1 s, then low. No control output is generated.
         board.led.set_low();
