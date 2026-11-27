@@ -1,0 +1,16 @@
+# algorithms —— 算法层（包名 algorithms）。
+#
+# 只依赖 `contracts`（PRE-07：数值唯一来源）。无第三方依赖、无堆、无 unsafe。
+# 与 `contracts` 的区别：契约层只放"接口事实"，凡是会在运行时算数、
+# 有状态、可单元测试的估计器都在这一层——它们不属于线协议。
+[package]
+name = "algorithms"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+contracts = { path = "../contracts" }

@@ -1,5 +1,5 @@
 {
-  // Every task is a thin wrapper over `cargo xtask` (xtask/src/main.rs).
+  // Every task is a thin wrapper over `cargo xtask` (software/xtask/src/main.rs).
   // No build logic lives here, so CLion/CI cannot drift from VS Code.
   "version": "2.0.0",
   "tasks": [

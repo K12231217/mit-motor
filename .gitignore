@@ -10,9 +10,9 @@
 !.idea/debug-profiles.json
 
 # xtask is its own workspace, so it has its own build dir.
-/xtask/target/
+/software/xtask/target/
 
-# 根 workspace（0_contracts + 3_user）的 host 构建目录。
+# 根 workspace（software/contracts + software/algorithms）的 host 构建目录。
 /target/
 
 # 厂商资料（DS 的 Markdown/SVG/zip）不入库：体积大、可重新下载，引脚事实在文档里引用路径与章节号。
@@ -22,3 +22,13 @@ docs/DS_stm32g474rb.zip
 # 第三方参考仓库的完整克隆（当前是 YHorizon-JM，自带 .git，约 38 MB）不入库：
 # 它属于上游代码，不是本仓产物。需要时按 docs/reference-implementations.md 的链接重新 clone。
 docs/ref/
+
+# Python helper caches（tools/ 下脚本的产物）
+__pycache__/
+*.pyc
+
+# 独立 crate 的嵌套构建目录（根 workspace 构建到 /target）
+/software/algorithms/target/
+/software/contracts/target/
+/software/bsp/target/
+/software/firmware/target/

@@ -1,17 +1,18 @@
 # 仓库根 workspace：只包含 host 侧、可单元测试的 crate。
 #
-# - `0_contracts`（包名 `contracts`）：接口事实表，零依赖。
-# - `3_user`（包名 `user`）：算法层（增益闸门/估计器），只依赖 `contracts`。
+# - `contracts`：接口事实表，零依赖。
+# - `algorithms`：算法层（增益闸门/估计器），只依赖 `contracts`。
 #
-# `firmware/` 与 `xtask/` 都是**独立 workspace**，必须 exclude：firmware 是
-# thumbv7em-none-eabihf 的 no_std 应用（自己的 `[workspace]` 保证 `cargo build`
-# 永远用 firmware/.cargo/config.toml 的目标与 runner），xtask 永远是 host 工具。
-# 把任何一个并进来都会改变 `cargo xtask rel/size/flash` 的行为。
+# `software/firmware` 与 `software/xtask` 都是**独立 workspace**，必须 exclude：
+# firmware 是 thumbv7em-none-eabihf 的 no_std 应用（自己的 `[workspace]` 保证
+# `cargo build` 永远用 `software/firmware/.cargo/config.toml` 的目标与 runner），
+# xtask 永远是 host 工具。把任何一个并进来都会改变 `cargo xtask rel/size/flash`
+# 的行为。
 #
-# `1_bsp` 是独立 thumb crate（T-011 脚手架），由 `firmware/` 以 path 依赖编译；
-# 它不能并入本 workspace，否则 `cargo test --workspace` 会尝试在 host 上编译
-# `embassy-stm32`。`2_system` / `4_app` 仍未建：无代码，空 crate 就是死代码。
+# `software/bsp` 是独立 thumb crate（T-011 脚手架），由 `software/firmware/` 以
+# path 依赖编译；它不能并入本 workspace，否则 `cargo test --workspace` 会尝试在
+# host 上编译 `embassy-stm32`。`system` / `app` 仍未建：无代码，空 crate 就是死代码。
 [workspace]
 resolver = "2"
-members = ["0_contracts", "3_user"]
-exclude = ["firmware", "xtask", "1_bsp"]
+members = ["software/contracts", "software/algorithms"]
+exclude = ["software/firmware", "software/xtask", "software/bsp"]

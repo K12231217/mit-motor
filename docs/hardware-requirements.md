@@ -1,10 +1,10 @@
 # 硬件需求规格（V2 板，STM32G474RBT6 + MP6540HA）
 
 > 状态：草稿 v0.4（2026-11-15）。主控 **STM32G474RBT6**（LQFP64，128 K Flash / 128 K SRAM），
-> 驱动 **MP6540HA**（订货号 `MP6540HGU-A-Z`，HS/LS 六输入，见 [architecture.md](architecture.md) §2.2）。
+> 驱动 **MP6540HA**（订货号 `MP6540HGU-A-Z`，HS/LS 六输入，见 [hardware-facts.md](archive/hardware-facts.md) §2.2）。
 > 与 PCB14 的关系：同封装、引脚功能逐脚核对兼容（§1），**但毕设必需的三类设施在 PCB14 上不存在**（§1.3）。
-> 相关：[architecture.md](architecture.md) 固件结构；[research-plan-v1.1-2026-11-04.md](research-plan-v1.1-2026-11-04.md) 研究方案；
-> 外包任务书的对抗审核与错误清单见 [taskbook-review.md](taskbook-review.md)。
+> 相关：[hardware-facts.md](archive/hardware-facts.md) 硬件事实、[software-architecture.md](software-architecture.md) 固件结构；[research-plan-v1.1-2026-11-04.md](archive/research-plan-v1.1-2026-11-04.md) 研究方案；
+> 外包任务书的对抗审核与错误清单见 [taskbook-review.md](archive/taskbook-review.md)。
 
 ## 0. 这份文档怎么用
 
@@ -24,7 +24,7 @@ V2 板不是为了换 MCU。换 MCU 是换料级改动；V2 板要做的是**补
 | 外设 | 3 ADC | 5 ADC / 7 COMP / 4 DAC / 6 OP-AMP / HRTIM / CORDIC / FMAC | §2.H 的调试设施因此可以白拿 |
 
 核对依据：CubeMX 器件库 `db/mcu/STM32G474R(B-C-E)Tx.xml`、`STM32G491R(C-E)Tx.xml` 两个器件文件
-按脚位比对，以及 PCB14 网表 `pcb/Netlist_PCB14_2026-11-11.tel`（**在 `hw/pcb14` 分支上，本分支没有这个文件**）；`firmware/` 已切到 `stm32g474rb`，`cargo build` / `cargo build --release` 在该特性下均已通过（2026-11-15，rustc 1.93.0-nightly gnu；ELF 68,732 B debug / 17,184 B release，镜像 69,320 / 17,768 B，比 1.99.1 的旧数据大约 6 %，来自工具链差异，见 `firmware/README.md`）。
+按脚位比对，以及 PCB14 网表 `hardware/pcb/Netlist_PCB14_2026-11-11.tel`（**在 `hw/pcb14` 分支上，本分支没有这个文件**）；`software/firmware/` 已切到 `stm32g474rb`，`cargo build` / `cargo build --release` 在该特性下均已通过（2026-11-15，rustc 1.93.0-nightly gnu；ELF 68,732 B debug / 17,184 B release，镜像 69,320 / 17,768 B，比 1.99.1 的旧数据大约 6 %，来自工具链差异，见 `software/firmware/README.md`）。
 
 **两条路径，建议都走**：
 - 路径 A（1 天）：现有 PCB14 换焊 G474RBT6，验证固件能否跑起来；
@@ -37,7 +37,7 @@ V2 板不是为了换 MCU。换 MCU 是换料级改动；V2 板要做的是**补
 
 | 构建 | flash 镜像 | 占 128 K |
 |---|---|---|
-| debug（仅 blinky + defmt）| **65,216 B** | 50 % |
+| debug（仅模板 bin + defmt）| **65,216 B** | 50 % |
 | release（同一模板）| **16,664 B** | 13 % |
 
 独立复测（rustc 1.93.0-nightly gnu，`stm32g474rb` 特性）：**69,320 B / 17,768 B**（53 % / 14 %）。
@@ -59,7 +59,7 @@ V2 板不是为了换 MCU。换 MCU 是换料级改动；V2 板要做的是**补
 3. **每次镜像增长都复核**：`llvm-objcopy -O binary` 后超过 100 KB 即在 §9 清单置红，不允许"先塞进去再说"。
 
 RC（256 K）/RE（512 K）与 RBT6 同封装同脚位、只差 Flash 密度：这是零改动板的升级路径，
-升级只需改 `firmware/memory.x` 的 FLASH 长度与 `stm32g474rb` → `stm32g474rc`/`stm32g474re`。
+升级只需改 `software/firmware/memory.x` 的 FLASH 长度与 `stm32g474rb` → `stm32g474rc`/`stm32g474re`。
 
 ### 1.2 三个必须在投板前确认的技术风险
 
@@ -177,14 +177,14 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 | HR-201 | 三路采样落在三个不同 ADC 单元（ADC1/ADC2/ADC3），由**同一 TIM1 事件**触发 | 目标偏斜 ≤ 50 ns；实测值写入测试记录，不做零假设 | HR-504 或 HR-804 |
 | HR-202 | 输入网络 | 100 Ω 串阻 + 100 pF 到 GND；三通道拓扑/取值/封装**完全一致**；采样时间 ≥ 68.5 cyc（@42.5 MHz ≈ 1.6 µs），推荐 92.5 cyc（2.2 µs）| 三通道互换电阻后零点与增益一致性 < 1 LSB |
 | HR-203 | 偏置与标度 | **4.99 kΩ/4.99 kΩ（±0.1 %，25 ppm）** → 静态 VREF/2、戴维南 2.495 kΩ、0.2712 V/A；12 bit → **2.97 mA/LSB**；±5 A 摆幅 ±1.356 V，电气满量程 ±6.08 A | 台架 ±7 点 × 双向（E1）|
-| HR-204 | **增益注入网络**（每相）| 默认 4.99k/4.99k；**上下各并联**一颗（串联会把 Rth 抬高 10 倍，见 [taskbook-review](taskbook-review.md) §2）：并 47 k ⇒ **−9.5 %**，并 1.5 k ⇒ −25 %，换 6.8 k ⇒ +35 %；等值成对 ⇒ 零位保持 VREF/2 | 切换后零位漂移 < 5 mV（E4）|
+| HR-204 | **增益注入网络**（每相）| 默认 4.99k/4.99k；**上下各并联**一颗（串联会把 Rth 抬高 10 倍，见 [taskbook-review](archive/taskbook-review.md) §2）：并 47 k ⇒ **−9.5 %**，并 1.5 k ⇒ −25 %，换 6.8 k ⇒ +35 %；等值成对 ⇒ 零位保持 VREF/2 | 切换后零位漂移 < 5 mV（E4）|
 | HR-205 | 偏置注入网络（每相）| 18 kΩ→+3V3 ⇒ +0.74 A，**但增益同时 −12 %**（18 k 拉低戴维南）；100 kΩ ⇒ +0.15 A / −2.4 %；"纯偏置"应改单个分压电阻的贴装值而非并联注入 | 静态读数变化与预期差 < 5 %，增益耦合量实测记录（E5）|
 | HR-206 | 串联分流位置（每相）| 2512 **10 mΩ / 1 W** + 四线开尔文焊盘 + 0 Ω 旁路跳线；短接时相线直通 | 5 A 下 DMM 200 mV 档，误差 < 0.5 % |
 | HR-207 | 基准同源 | VREF+ 与 VDDA 接 +3V3（LDO），SOx 偏置也取自 +3V3；不装外部基准芯片（相对标定不需要；绝对刻度用 HR-810 反算 VDDA）| TP4 实测 3.3 V ±1 % |
 | HR-208 | 通道对称性 | 三路之间不允许任何单侧滤波、TVS 或不同封装；如需滤波必须三路同值 | 目视 + BOM 比对 |
 | HR-209 | SOx 节点可注入 | 保留裸 SOx 焊盘 + 100 Ω 隔离，允许外部源经串阻注入而不拆电阻 | 注入 ±1 mA 时读数线性 |
 | HR-210 | **（决策项）母线分流** | 1 mΩ + 差分放大 → PA0(ADC1_IN1)，默认不装；这是架构 §10 未决"是否需要第二观测通道"唯一的硬件入口 | 装机后与三路和电流对比 |
-| HR-211 | 外部电流真值通道 | **PB12(ADC4_IN3)** + 3 pin 接口（只出 `EXT_I_REF` 与 GND，**不要把 VREF+ 引到连接器**，见 [taskbook-review](taskbook-review.md) P1-5）；100 Ω 串阻 + 钳位；与三路同帧采样，用来消掉跨仪器对时误差 | 与 DMM/INA240 读数在同一帧内对比，偏差 < 1 % |
+| HR-211 | 外部电流真值通道 | **PB12(ADC4_IN3)** + 3 pin 接口（只出 `EXT_I_REF` 与 GND，**不要把 VREF+ 引到连接器**，见 [taskbook-review](archive/taskbook-review.md) P1-5）；100 Ω 串阻 + 钳位；与三路同帧采样，用来消掉跨仪器对时误差 | 与 DMM/INA240 读数在同一帧内对比，偏差 < 1 % |
 
 > HR-203 的边界：±6.08 A 时 SOx 节点贴到 0 V/3.3 V 轨，**工作区按 ±5 A 设计**，±6 A 只作为满量程定义。
 > 这一条必须写进论文，否则"2.97 mA/LSB"会被误读成全量程可用。
@@ -194,35 +194,35 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 | 编号 | 需求 | 指标 | 验收 |
 |---|---|---|---|
 | HR-301 | HSE | 16 MHz 晶振（CAN FD 位定时；HSI16 ±1 % 不够）| 频率实测 ±50 ppm |
-| HR-302 | 主频与 PWM | SYSCLK 170 MHz（boost）；TIM1 中心对齐 20 kHz，ARR = 4250；**MP6540HA 是 HSx/LSx 六输入、无内部死区，死区必须由 TIM1 BDTR 产生（建议 200–500 ns，按手册 t_d 定）**；**`TIM1_BDTR.AOE = 0`**：BKIN 清 MOE 后禁止更新事件自动恢复出力 | STROBE1 周期 50 µs ±0.1 %；死区用 LA 实测；AOE 位读回为 0 |
+| HR-302 | 主频与 PWM | SYSCLK 170 MHz（boost）；TIM1 中心对齐 20 kHz，ARR = 4250；**MP6540HA 是 HSx/LSx 六输入、无内部死区，死区必须由 TIM1 BDTR 产生（建议 200–500 ns，按手册 t_d 定）**；**`TIM1_BDTR.AOE = 0`**。2026-11-27 网表无 TIM1_BKIN，硬件 break 缺口；当前 `BKE=0` | 周期 50 µs；死区用 LA 实测；AOE/BKE 读回为 0 |
 | HR-303 | ADC 时钟 | 42.5 MHz（PLLP 170/4）；三个 ADC 同源同频（不同源则 HR-201 不成立）| 寄存器读回 + 时序实测 |
-| HR-304 | USB 时钟 | HSI48 + CRS；**不**从 PLL 取 48 MHz（整数分频不可行）| 枚举成功 + SOF 计数 |
+| HR-304 | USB 时钟 | **最新网表无 USB**（PA11/PA12 为 CAN）；本条仅保留历史 | — |
 | HR-305 | 采样窗口 | 全低边共导窗口 ≥ 3 µs（ADC 2.5 µs + 余量）⇒ 占空比上限 d ≤ 90 %，由固件夹紧 | 示波器测窗口（E3）|
 
 ### D. 保护与故障（HR-4xx）
 
 | 编号 | 需求 | 指标 | 验收 |
 |---|---|---|---|
-| HR-401 | 母线过压 | 比较器（TLV7021）+ 2.5 V 基准 → **TIM1_BKIN（PB10，与 nFAULT 共网）**；100k/9.76k ⇒ 翻转 **28.1 V ±2 %**；响应 ≤ 1 µs | 可调电源缓升，记录翻转点（E6）|
-| HR-402 | 驱动故障 | nFAULT 开漏 + 10 kΩ 上拉，**同一网络接两个脚**：PB10(TIM1_BKIN，硬件封锁) + PC9(GPIO/EXTI，软件读故障)；MP6540 的 nFAULT 自清行为按手册确认 | 拉低即封锁 PWM，且软件读得到 |
+| HR-401 | 母线过压 | **2026-11-27 网表未把比较器接到 TIM1_BKIN**；当前 `BKE=0`，硬件封锁缺口。软件 OVP 阈值待定 | 补硬件或软件停机后再测（E6）|
+| HR-402 | 驱动故障 | nFAULT 开漏 + 10 kΩ 上拉，**PC8**（GPIO/EXTI，软件读故障）；最新网表未接 TIM1_BKIN。MP6540 的 nFAULT 自清行为按手册确认 | 拉低软件锁存并关 MOE |
 | HR-403 | 低边通道 | LS_A/B/C = TIM1_CH1N/2N/3N（`PB13/PB14/PB15`，与 HS 互补）；**没有独立 EN 引脚**，相高阻 = 上下输入全低 | LA 测六路时序与死区 |
-| HR-404 | 上电默认态 | nSLEEP（PC5）10 kΩ 下拉、六路输入全低、PWM 无输出；只有固件显式释放 | 冷上电用 LA 抓时序 |
+| HR-404 | 上电默认态 | nSLEEP（**PC7**）10 kΩ 下拉、六路输入全低、PWM 无输出；只有固件显式释放 | 冷上电用 LA 抓时序 |
 | HR-405 | 温度 | NTC 10 kΩ 分压（PC0），贴在 MP6540HA 与母线电容之间 | 两点校准 |
-| HR-406 | 母线电压检测 | PA3，100k/8.06k ⇒ 满量程 44.2 V，10.8 mV/LSB | 与 DMM 比对 5 点 |
+| HR-406 | 母线电压检测 | **PB11**，分压比按最新网表；满量程/每 LSB 待按阻值复核 | 与 DMM 比对 5 点 |
 | HR-407 | 参数保存 | 不需要掉电保存（每次上电自校准）；不设 EEPROM | — |
-| HR-408 | 停车语义 | 六路全无效 = 上下管全关 = **自由停车**（不是刹车）；要刹车需主动拉高三相 LS。故障动作：硬件 break 先动作，固件只负责锁存 | 堵转下触发 OVP，确认电机自由滑行 |
+| HR-408 | 停车语义 | 六路全无效 = 上下管全关 = **自由停车**（不是刹车）；要刹车需主动拉高三相 LS。最新网表无硬件 break，故障动作由软件锁存 + `disable` | 堵转下触发 OVP/nFAULT，确认自由滑行 |
 
 ### E. 外部调试设施（HR-5xx）
 
 | 编号 | 需求 | 指标 | 验收 |
 |---|---|---|---|
-| HR-501 | 三个 strobe | **PC6 / PC7 / PC8**（PCB14 已预留但未引出）→ 3 pin 排针 + TP；由 **TIM8_CH1/2/3**（或 HRTIM1_CHF1/CHF2/CHE1）硬件驱动，TIM8 以 TIM1_TRGO 为触发源保持固定相位，边沿位置由 CCR 在周期内编程，不依赖中断 | 示波器/LA 抓取（E3）|
+| HR-501 | 三个 strobe | **最新网表未引出**；PC7/PC8 已改 nSLEEP/nFAULT。本条仅保留历史 | — |
 | HR-502 | 调试排针 J_DBG | 2×9：PWM_A/B/C、EN_A/B/C、nFAULT、BKIN、STROBE1/2/3、CAN_TX/RX、UART_TX、VBUS_DIV、GND×2 | 逐针通断 |
 | HR-503 | 模拟测试点 | 见 §5 表；丝印标网络名 + TP 编号 | 逐点通断/电压 |
 | HR-504 | J_SYNC | 三路 ADC 输入经 3 位跳线可共接到同一注入节点（外部信号源或 TP17 的 DAC 驱动）| 方波能同时出现在三路 |
-| HR-505 | 状态指示 | **PB2** 单 LED（新增，PCB14 的 LED2 不可控），编码见 §6 | 逐状态点亮 |
+| HR-505 | 状态指示 | **最新网表无 MCU LED**（只有电源指示 LED1）；状态以 RTT/帧为准 | — |
 | HR-506 | SWD | PA13/PA14 + NRST(7) + 3V3 + GND，5 pin 2.54 或 10 pin 1.27；PB3 = SPI1_SCK 故 **SWO 不可用**，调试输出走 RTT | probe-rs 烧写 + RTT |
-| HR-507 | 串口 | USART3（PB10/PB11）引出 3 pin，115200–1 M | 环回测试 |
+| HR-507 | 串口 | 最新网表 `USART3_TX/RX` 在 **PB6/PB7**（实际 AF 需核对）；3 pin，115200–1 M | 环回测试 |
 
 ### F. 结构与工艺（HR-6xx）
 
@@ -277,6 +277,10 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 V2 与 PCB14 的差别集中在模拟前端（为片内 OPAMP 让路）、6 路 PWM、CAN/UART/BKIN 的挪位——
 **"同封装可直接换料"只对"能不能跑起来"成立，不代表 V2 能沿用 PCB14 的走线。**
 
+> **2026-11-27 最新网表 `hardware/pcb/Netlist_Schematic14_1_2026-11-27.tel` 覆盖了本节的
+> nSLEEP/nFAULT/BKIN、模拟前端、CAN/UART、编码器片选与测试点。以 §3.1 为准；下表是
+> V2 需求历史，冲突行不再使用。**
+
 | 功能 | 引脚 | Pin | PCB14 | G474RBT6 上确认 | V2 动作 |
 |---|---|---|---|---|---|
 | PWM_HS A/B/C | PA8 / PA9 / PA10 | 42 / 43 / 44 | 已接（同名）| TIM1_CH1/2/3 | 沿用 |
@@ -318,52 +322,62 @@ V2 与 PCB14 的差别集中在模拟前端（为片内 OPAMP 让路）、6 路 
 时钟树：HSE 16 M → PLL M=4/N=85/P=2 ⇒ 170 MHz（boost）；ADC 42.5 MHz；
 USB 48 MHz 由 HSI48+CRS；CAN FD 位定时由 HSE 派生。
 
-## 4. 仪器接线方案
+### 3.1 最新网表覆盖（Schematic14_1，2026-11-27）
 
-### 4.1 示波器（双通道）四种配置
+来源：`hardware/pcb/Netlist_Schematic14_1_2026-11-27.tel`（U1 = G474RBT6 LQFP64）。未列出的
+PWM_HS、BOOT0、SWD、HSE 与上表一致；下列行**覆盖上表**。
 
-| 目的 | CH1 | CH2 | 判据 |
+| 功能 | 最新引脚 | U1 脚 | 网络 / 备注 |
 |---|---|---|---|
-| 采样窗口与前端建立 | TP5（SOx_RAW）| STROBE1（J_DBG）| SOx 在 STROBE1 上升沿前 ≥ 0.5 µs 已稳定；窗口内三相低边共导 |
-| 传递特性与饱和 | HR-206 分流器开尔文电压（20 mV/div）| TP8（ADC 侧）| ±5 A 内线性，偏差 < 1 %；超量程看削顶位置 |
-| 故障时序 | EN_A（J_DBG）| BKIN 或 nFAULT（J_DBG）| BKIN 有效到 EN 变低 ≤ 2 µs；PWM 同周期无效 |
-| 模拟遥测（无 LA 时）| TP17（DAC 输出 i_q）| TP5（SOx_RAW）| DAC 与 SOx 同相；STROBE1 处采样值与 DAC 同拍一致 |
+| PWM_LS A/B/C | PB13 / PB14 / PB15 | 35/36/37 | `PWM_AL/BL/CL`（与原 V2 表一致；PCB14 的 LS A=PA7 不适用） |
+| nSLEEP | **PC7** | 39 | `NSLEEP`，输出高有效；`.ioc` 写成 PC8 是旧版 |
+| nFAULT | **PC8** | 40 | `NFAULT`，开漏低有效，上拉；`.ioc` 写成 PC7 是旧版 |
+| TIM1_BKIN | **未引出** | — | 网表无 `BKIN` 网络；`BKE` 必须为 0，硬件过压 break 缺口 |
+| 相电流 OPAMP 输入 | OPA1=SOC→**PA3**；OPA2=SOB→**PA7**；OPA3=SOA→**PB0** | 17/21/24 | **A/C 相与 OPAMP 通道交叉**；4.99 kΩ 偏置网络 |
+| VBUS_ADC | **PB11** | 33 | 原 V2 表的 PA3 不再使用 |
+| DAC1_OUT1 / OUT2 | PA4 / PA5 | 18/19 | TP1 / TP2；只连外部脚，不进内部采样链 |
+| USART3_TX / RX | PB6 / PB7 | 59/60 | 网表网络名为 USART3；`.ioc` 标为 USART1，AF 需核对 |
+| FDCAN / USB | PA11 / PA12 | 45/46 | 网表为 `CAN_RX/TX`（FDCAN1）；**本板无 USB** |
+| ENC1_CS / ENC2_CS | PC12 / PC10 | 54/52 | 原 V2 表的 PB7/PB9 不适用 |
+| STROBE1/2/3 | **未引出** | — | 原 V2 表的 PC6/PC7/PC8 不适用；PC7/PC8 已改 nSLEEP/nFAULT |
+| 状态 LED | **无 MCU LED** | — | 网表只有电源指示 LED1；原 PB2 心跳不适用 |
+| EXT_I_REF / COMP2_OUT / OPAMP4 | **未引出** | — | 最新网表没有这些网络 |
+| NTC | U1.11 / `ADC12_IN6` | 11 | 网表网络名；MCU 引脚名以封装表复核 |
 
-### 4.2 逻辑分析仪（16 通道，≥100 MS/s）
+## 4. HIL 探针（2026-11-27 网表）
 
-| CH | 信号 | CH | 信号 |
-|---|---|---|---|
-| 0 | PWM_A | 8 | STROBE1（ADC 触发）|
-| 1 | PWM_B | 9 | STROBE2（ISR 窗口）|
-| 2 | PWM_C | 10 | STROBE3（标定更新）|
-| 3 | EN_A | 11 | CAN_TX |
-| 4 | EN_B | 12 | CAN_RX |
-| 5 | EN_C | 13 | UART_TX |
-| 6 | nFAULT | 14 | COMP2_OUT（过压内部比较器）|
-| 7 | BKIN | 15 | GND |
+### 4.1 T-012：clock + PWM 安全关断态
 
-判据：STROBE1 与 STROBE2 上升沿间隔 = 0；STROBE2 脉宽 ≤ 25 µs 且周期抖动 ≤ 1 µs；
-EN 在 BKIN 后 ≤ 2 µs 变低；上电时 nSLEEP/EN/PWM 顺序符合 HR-404。
+| 探针 | 位置 | 期望 |
+|---|---|---|
+| +3V3 / GND | 板级 3V3/GND | 3.30 V |
+| HSE（可选） | PF0 / PF1（5/6） | 16 MHz |
+| HS A/B/C | PA8/9/10（42/43/44）→ U9.6/7/8 | 低 |
+| LS A/B/C | PB13/14/15（35/36/37）→ U9.3/4/5 | 低 |
+| nSLEEP | PC7（39）→ U9.2 | 低 |
+| nFAULT | PC8（40）→ U9.1 | 高 |
+| BKIN | 无 | 本板无 BKIN，`BKE=0` |
+
+RTT：`clock=ok`、`pwm=ok arr=4250 dtg=85 moe=false aoe=false bke=false`。
+安全关断态通过后，才允许不接电机、限流下临时 `enable`：HS/LS 互补、周期 50 µs、死区约 500 ns。
+
+### 4.2 T-013：电流采样 / DAC / 片内 OPAMP
+
+- `SOA/SOB/SOC`（U9.15/16/17）经 4.99 kΩ 网络进 `OPA3/OPA2/OPA1`（PB0/PA7/PA3）；**A/C 交叉**。
+- 静态偏置约 1.65 V（VREF+/2）；HR-203 标度 0.2712 V/A、2.97 mA/LSB。
+- `DAC1_OUT1/2`（PA4/PA5，TP1/TP2）只到外部脚，只能作外部注入/基准。
+- 片内 OPAMP1/2/3 follower，输出内部到 ADC1/2/3；无 OPAMP4/COMP2_OUT。
 
 ## 5. 测试点与注入网络
 
 | TP | 网络 | 用途 |
 |---|---|---|
-| TP1 / TP2 | VBUS（电容后）/ PGND | 母线压降、开关振铃；TP2 是功率地参考 |
-| TP3 / TP4 | +5 V / +3.3 V | 逻辑轨；**TP4 同时是 VREF 与偏置源，绝对刻度的依据** |
-| TP5/6/7 | SOx_RAW（A/B/C）| 芯片输出，判断补偿/饱和 |
-| TP8/9/10 | SOx_ADC（A/B/C，100 Ω 之后）| 判断前端网络与 ADC 输入 |
-| TP11 | PH_A | 开关节点与 SOx 恢复时间的关系 |
-| TP12 | VREF_2V5 | OVP 比较基准 |
-| TP13 | OVP_DIV | 过压阈值实测点 |
-| TP14 | NTC | 温度读数核对 |
-| TP15 | VBUS_DIV | 与 DMM 比对换算系数 |
-| TP16 | J_SYNC 注入节点 | HR-201/504 同步实测；可由 TP17 的 DAC 直接驱动 |
-| TP17 | DAC1_OUT1（PA4）| 模拟遥测：i_a / i_q / 残差 / 标定状态 |
-| TP18 | COMP2_OUT（PA2）| 内部过压比较器输出，LA 可抓 |
+| TP1 | DAC1_OUT1（PA4） | 外部模拟注入/基准 |
+| TP2 | DAC1_OUT2（PA5） | 外部模拟注入/基准 |
+| TP3 | 未分配 | 按实物确认 |
 
-注入与替身网络：`JP_GAIN_A/B/C`（三档增益，HR-204）、`JP_OFF_A/B/C`（双向偏置，HR-205）、
-`R_SHUNT_A/B/C`（10 mΩ + 旁路，HR-206）、`J_SYNC`（HR-504）。
+`SOA/SOB/SOC` 测试脚：按丝印/通断确认是 U9.15/16/17（驱动侧）还是 OPA1/2/3（运放输入侧）。
+PCB14 的 TP5/6/7 是滤波后 ADC 侧，与最新板不是同一套，不能混用。
 
 ## 6. 状态输出约定
 
@@ -387,7 +401,7 @@ LED（PB2）编码：灭 = 未使能；1 Hz 闪 = 待机；常亮 = 运行；5 H
 LED 只能看粗状态，**判据一律以状态字为准**；示波器/LA 用 STROBE + 帧序号对齐到同一个 50 µs 周期。
 
 状态字之外，每帧还必须带三个标量（否则事后无法区分算法错与基准漂）：
-`VREFINT 原始码`（HR-810，反算 VDDA）、`ISR 周期数`（HR-812）、`样本时间戳`（TIM5 32 bit，1 µs 分辨率；TIM2 被 embassy 时基占用，见 firmware/README.md）。
+`VREFINT 原始码`（HR-810，反算 VDDA）、`ISR 周期数`（HR-812）、`样本时间戳`（TIM5 32 bit，1 µs 分辨率；TIM2 被 embassy 时基占用，见 software/firmware/README.md）。
 
 ## 7. 需求 → 毕设实验
 
@@ -438,4 +452,4 @@ LED 只能看粗状态，**判据一律以状态字为准**；示波器/LA 用 S
 - [ ] SRAM2 划出黑匣子段，启动代码不清该段
 - [ ] CORDIC/FMAC 时钟与 DBGMCU 的 DWT 保持开启
 - [ ] 丝印含 TP/J 编号、版本号、LED 编码简表
-- [ ] Flash 预算按 release 复核（debug 64,632 B / release 16,080 B，模板实测，128 K 的 49 %/12 %；超过 100 KB 即置红，见 §1.1）
+- [ ] Flash 预算按 release 复核（数字只在 `cargo xtask size` 输出里，本文件不复写；PRE-09）

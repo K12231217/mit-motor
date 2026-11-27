@@ -1,114 +1,189 @@
 # 固件文件架构（v0.1，2026-11-15 敲定）
 
-> 本文**取代** [architecture.md](architecture.md) §4–§6（crate 划分、任务表、数据流）作为文件级唯一版本；
-> architecture.md 的 §2 硬件事实仍然有效。需求编号见 [hardware-requirements.md](hardware-requirements.md)。
+> 本文是文件级唯一版本（crate 划分、任务表、数据流），取代旧 `architecture.md` 的 §4–§6；
+> 硬件事实见 [hardware-facts.md](archive/hardware-facts.md) §2。需求编号见 [hardware-requirements.md](hardware-requirements.md)。
+> **状态标记**：树中标 `[计划]` 的条目尚未实现；实际落地状态见 [as-built.md](archive/as-built.md)。
 > 本轮只定**文件与契约**，不落实现。
 
 ## 1. 六条不变量（每条都有检查手段，不靠自觉）
 
 | # | 不变量 | 检查 |
 |---|---|---|
-| I1 | 依赖单向：`{0_contracts} ← {1_bsp, 2_system, 3_user} ← 4_app` | `cargo tree -p user` 里出现 `bsp` 即失败 |
-| I2 | `unsafe` 只出现在 `1_bsp/src/**` 与 `4_app/src/{fault,sections}.rs` | 其余 crate 根写 `#![forbid(unsafe_code)]`；CI 里 `grep -rn "unsafe"` 白名单 |
+| I1 | 依赖单向：`{contracts} ← {bsp, system, algorithms} ← app` | `cargo tree -p algorithms` 里出现 `bsp` 即失败 |
+| I2 | `unsafe` 只出现在 `software/bsp/src/**` 与 `software/app/src/{fault,sections}.rs` | 其余 crate 根写 `#![forbid(unsafe_code)]`；CI 里 `grep -rn "unsafe"` 白名单 |
 | I3 | 无堆：链接产物无 `__rust_alloc` | `llvm-nm` 搜索结果为零；`cargo tree` 无 `alloc` 特性 |
-| I4 | 20 kHz 路径只由硬件事件驱动，**不含 `await`/`defmt`/锁** | `grep -n "await\|defmt\|mutex" 4_app/src/tasks/current.rs` 为零 |
+| I4 | 20 kHz 路径只由硬件事件驱动，**不含 `await`/`defmt`/锁** | `grep -n "await\|defmt\|mutex" software/app/src/tasks/current.rs` 为零 |
 | I5 | 跨优先级数据只用无锁快照/有界队列，满即丢并计数 | 每个队列有 `dropped` 计数器进状态字 |
 | I6 | 每个 ISR 有周期上界，实测值进遥测 | DWT 进出打点，`isr_cycles` 字段 |
 
+### 1.1 模块标识：名字由四轴推导，不允许同义词
+
+**一个模块 = 一个目录 + 一个公共头 + 一个 owner + 一份契约。** 模块名不是文件名的别名，
+而是下面四轴的唯一拼接；四轴之外不允许加词（`handler`、`manager`、`util`、`core` 都不是角色）。
+
+| 轴 | 闭集 | 回答 |
+|---|---|---|
+| layer | `app` / `dev` / `bsp` / `lib` | 它住在哪一层？ |
+| domain | `joint` / `motor` / `rc` / `imu` | 它是什么领域对象？ |
+| role | `task` / `service` / `protocol` / `bus` / `config` / `chain` | 它扮演什么角色？ |
+| owner | 一个任务/ISR 或 `lib` | 谁拥有它的状态？唯一写者 |
+
+规范 ID：`<layer>.<domain>.<role>[_<qualifier>]`，全小写 `snake_case`；`qualifier` 是领域名词
+（如 `gate`、`icd`、`encoder`），不是角色或同义词。目录必须落在
+`<crate>/src/<domain>/<role>[_<qualifier>].rs` 或同名目录；`src/lib.rs`、`src/**/mod.rs` 与
+`src/bin/*` 是公共头/入口例外。模块名只认 ID，路径是它的机械投影。
+
+- **唯一 owner**：有可变状态的模块只能有一个写者；其他模块通过 `Snapshot` / 有界队列读，
+  或只拿不可变引用。出现第二个写者就拆模块或改 role，不许“两边都写一点”。
+- **一份契约**：公共头/注册表的 `contract` 列写该模块对外承诺的不变量（单写者、输出边界、
+  单位、失败语义）。契约不写实现细节。
+- **推导顺序**：先答 layer → domain → role → owner，再拼 ID；ID 已存在就是同一个模块，
+  不允许再起第二个名字。新模块的目录名必须用 ID 的 `<role>_<qualifier>` 形式；存量按注册表迁移。
+
+### 1.2 模块注册表（机器校验）
+
+H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一且四轴合法、owner/contract 非空。
+表是模块名与所有权的唯一真源；`cargo xtask hygiene` 失败即阻断。
+
+<!-- module-registry:start -->
+| module id | path | owner | contract |
+|---|---|---|---|
+| `lib.joint.protocol_icd` | `software/contracts/src/joint/protocol_icd.rs` | `lib` | 线协议布局与解码；只读、无策略 |
+| `lib.joint.protocol_wire` | `software/contracts/src/joint/protocol_wire.rs` | `lib` | 线协议与内部类型换算的唯一入口；无策略 |
+| `lib.joint.protocol_events` | `software/contracts/src/joint/protocol_events.rs` | `lib` | 队列事件与命令；单写者 |
+| `lib.joint.protocol_faults` | `software/contracts/src/joint/protocol_faults.rs` | `lib` | 状态字位域；纯函数 |
+| `lib.joint.protocol_snapshot` | `software/contracts/src/joint/protocol_snapshot.rs` | `lib` | seqlock；每个方向单写者 |
+| `lib.joint.protocol_fsm` | `software/contracts/src/joint/protocol_fsm.rs` | `lib` | 状态机类型；不含迁移规则 |
+| `lib.motor.protocol_trust` | `software/contracts/src/motor/protocol_trust.rs` | `lib` | Trust 枚举；Unknown=0 |
+| `lib.motor.protocol_types` | `software/contracts/src/motor/protocol_types.rs` | `lib` | 物理量与定点类型；无策略 |
+| `lib.motor.config_hw` | `software/contracts/src/motor/config_hw.rs` | `lib` | 器件事实与电气硬约束；编译期断言 |
+| `lib.joint.config_budget` | `software/contracts/src/joint/config_budget.rs` | `lib` | 系统预算；只读 |
+| `lib.joint.service_contracts` | `software/contracts/src/lib.rs` | `lib` | crate 根与 re-export；无状态 |
+| `bsp.motor.service_clock` | `software/bsp/src/motor/service_clock.rs` | `init` | HSE 16M/PLL 170M 配置与读回；不匹配进 fault |
+| `bsp.motor.bus_pwm` | `software/bsp/src/motor/bus_pwm.rs` | `current @8` | TIM1 20 kHz/500 ns；无 BKIN（BKE=0）；enable 检查 nFAULT |
+| `bsp.motor.bus_adc` | `software/bsp/src/motor/bus_adc.rs` | `current @8` | ADC 注入组唯一所有者；三路同拍 |
+| `bsp.motor.bus_encoder` | `software/bsp/src/motor/bus_encoder.rs` | `current @8` | SPI1/主编码器唯一所有者；只搬字节 |
+| `bsp.motor.service_dwt` | `software/bsp/src/motor/service_dwt.rs` | `current @8` | DWT 周期计数；只读 |
+| `bsp.joint.service_board` | `software/bsp/src/lib.rs` | `init` | Board 单实例；构造后 move 移交 |
+| `lib.motor.service_gate` | `software/algorithms/src/motor/service_gate` | `calib @2` | GainGate 唯一写者；组窗不写主窗 |
+| `lib.motor.service_encoder` | `software/algorithms/src/motor/service_encoder` | `current @8` | SPI1 唯一所有者；帧判据纯函数 |
+| `lib.joint.service_fsm` | `software/algorithms/src/joint/service_fsm` | `app state owner` | 迁移矩阵唯一实现 |
+| `lib.motor.config_motor` | `software/algorithms/src/motor/config_motor.rs` | `lib` | WK4310H 铭牌参数；每相/磁链换算 |
+| `lib.motor.config_policy` | `software/algorithms/src/motor/config_policy.rs` | `lib` | 策略阈值唯一来源；不复制 contracts |
+| `lib.motor.chain_foc` | `software/algorithms/src/motor/chain_foc` | `current @8` | Clarke/Park 纯函数；幅值不变 |
+| `lib.motor.chain_svpwm` | `software/algorithms/src/motor/chain_svpwm` | `current @8` | 输出边界 ClampedModulation；D_MAX 夹紧 |
+| `lib.motor.chain_sense` | `software/algorithms/src/motor/chain_sense` | `current @8` | 码到安培；不做零和修正 |
+| `lib.motor.chain_pid` | `software/algorithms/src/motor/chain_pid` | `current @8` | PI 状态唯一写者；抗饱和 |
+| `lib.motor.chain_current` | `software/algorithms/src/motor/chain_current` | `current @8` | dq 电流环；电压圆唯一限幅 |
+| `lib.joint.service_supervisor` | `software/algorithms/src/joint/service_supervisor` | `supervisor @7` | 心跳与超时锁存；clear 显式 |
+| `lib.motor.service_math` | `software/algorithms/src/motor/service_math.rs` | `lib` | 无 libm 数值；纯函数 |
+| `lib.joint.service_user` | `software/algorithms/src/lib.rs` | `lib` | crate 根与 re-export；无状态 |
+| `app.motor.task_bringup` | `software/firmware/src/bin/main.rs` | `bringup` | S0 探针；单 Board owner；无电机输出 |
+<!-- module-registry:end -->
+
 ## 2. 工作区与文件树
 
-**目录可带数字前缀，crate 名不能**（Rust 标识符不能以数字开头）。所以 `Cargo.toml` 里用路径声明、
-包名去掉前缀：`0_contracts/` → `name = "contracts"`，`4_app/` → `name = "app"`。
+**目录与 crate 同名，不再使用数字前缀**。Rust 标识符不能以数字开头，数字前缀本来就是历史包袱；
+现行 crate 根：`software/contracts/`、`software/algorithms/`、`software/bsp/`、`software/firmware/`。
+`software/system/` 与 `software/app/` 是目标位，落地后按同一规则命名。
 
 ```toml
 # Cargo.toml（仓库根）
 [workspace]
 resolver = "2"
-members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
+members = ["software/contracts", "software/algorithms"]          # system/app 落地后再加入
+exclude = ["software/firmware", "software/xtask", "software/bsp"]         # 独立 thumb / host 工具 workspace
 ```
 
 ```
-0_contracts/            # 零依赖、零 unsafe、host+target 双用（包名 contracts）
-  src/lib.rs            #   只做 re-export + ICD 版本常量
-  src/types.rs          #   Duty / DqTarget / RawSample3 / PhaseCurrent / Mode
-  src/snapshot.rs       #   Snapshot<T>：seqlock，快环↔慢环唯一的跨优先级通道
-  src/events.rs         #   Event / Cmd 枚举 + 各队列容量常量
-  src/faults.rs         #   FaultCode + 32 bit 状态字位定义
-  src/fsm.rs            #   状态机类型：MotorState / Event / 迁移输入
-  src/trust.rs          #   Trust 等契约层结果类型（门控可信度）
-  src/icd.rs            #   TraceFrame / CanFrame 的 repr(C) 布局 + 编译期 size 断言
-  src/limits/hw.rs      #   器件事实与电气硬约束（D_MAX、采样窗口、MT6701 位宽）
-  src/limits/budget.rs  #   系统预算（环频率、帧率、队列容量、看门狗）
-  src/limits/mod.rs     #   limits 汇总 re-export（数值仍只在 hw/budget 定义一次）
+software/contracts/            # 零依赖、零 unsafe、host+target 双用（包名 contracts，layer lib）
+  src/lib.rs            #   只做 re-export；公共头
+  src/joint/mod.rs      #   joint 模块树
+  src/joint/protocol_icd.rs      #   CmdFrame/FbFrame/SlowFrame
+  src/joint/protocol_wire.rs     #   CmdFrame→Cmd→CmdView、定点缩放
+  src/joint/protocol_events.rs   #   Event / Cmd + 队列容量
+  src/joint/protocol_faults.rs   #   FaultCode + 32 bit 状态字
+  src/joint/protocol_snapshot.rs #   Fast/Cmd/Gain seqlock
+  src/joint/protocol_fsm.rs      #   MotorState / Event / 迁移输入
+  src/joint/config_budget.rs     #   系统预算（环频率、帧率、队列容量、看门狗）
+  src/motor/mod.rs               #   motor 模块树
+  src/motor/protocol_trust.rs    #   Trust
+  src/motor/protocol_types.rs    #   Duty / DqTarget / RawSample3 / PhaseCurrent / Mode
+  src/motor/config_hw.rs         #   器件事实与电气硬约束（D_MAX、采样窗口、MT6701 位宽）
 
-1_bsp/                  # 唯一 unsafe 层（包名 bsp）[T-011 脚手架]
+software/bsp/                  # 唯一 unsafe 层（包名 bsp）[T-012 clock/pwm 已实现]
   src/lib.rs            #   Board 类型、init 构造后 move 移交、所有权表
-  src/clock.rs          #   RCC 读回校验（embassy 配，bsp 验）
-  src/gpio.rs           #   PWM/CS/STROBE/LED 的静态配置
-  src/pwm.rs            #   TIM1：6 路 + BDTR 死区 + BKIN
-  src/adc.rs            #   ADC1/2/3 注入组 + TIM1_TRGO2 + DMA + 窗口判据
-  src/dma.rs            #   3 通道搬运与完成序
-  src/encoder.rs        #   SPI1 双 CS + MT6701 读帧
-  src/can.rs            #   FDCAN2（embassy-stm32 包装，类型不外泄）
-  src/usb.rs            #   USB FS（embassy-usb 包装）；**热路径不碰**
-  src/uart.rs           #   调试串口：最简阻塞写，fault dump 专用
-  src/dwt.rs            #   CYCCNT 计时与剖面
-  src/faultentry.rs     #   HardFault/panic 的裸入口（第二处 unsafe）
+  src/motor/mod.rs      #   motor 模块树
+  src/motor/service_clock.rs   #   RCC 读回校验（embassy 配，bsp 验）
+  src/motor/bus_pwm.rs         #   TIM1：6 路 + BDTR 死区（本板无 BKIN）
+  src/motor/bus_adc.rs         #   ADC1/2/3 注入组 + TIM1_TRGO2 + DMA + 窗口判据
+  src/motor/bus_encoder.rs     #   SPI1 双 CS + MT6701 读帧
+  src/motor/service_dwt.rs     #   CYCCNT 计时与剖面
+  src/motor/bus_dma.rs         #   [计划] 3 通道搬运与完成序
+  src/motor/bus_can.rs         #   [计划] FDCAN2（embassy-stm32 包装，类型不外泄）
+  src/joint/bus_uart.rs        #   [计划] 调试串口：最简阻塞写，fault dump 专用
+  src/joint/bus_usb.rs         #   [计划] USB FS（板载 USB 已砍，见 INDEX §1）
+  src/joint/service_gpio.rs    #   [计划] PWM/CS/STROBE/LED 的静态配置
+  src/joint/service_fault.rs   #   [计划] HardFault/panic 的裸入口（第二处 unsafe）
 
-2_system/               # 服务层（包名 system），forbid(unsafe)
+software/system/               # 服务层（包名 system），forbid(unsafe)
   src/lib.rs
   src/log.rs            #   try_log：无锁环，满则丢；flush 只在最低优先级
   src/time.rs           #   TIM5 @1 MHz + 64 位溢出扩展（TIM2 归 embassy 时基）
   src/queue.rs          #   事件/指令/日志队列封装（容量来自 contracts）
-  src/trace.rs          #   Snapshot → TraceFrame 打包（含 flags 位）
+  src/trace.rs          #   [计划] Snapshot → TraceFrame 打包（含 flags 位）
   src/watchdog.rs       #   通信中断 > 20 ms 停机
 
-3_user/                 # 纯算法（包名 user），no_std + forbid(unsafe)，x86 可测
-  src/lib.rs            #   #![no_std] #![forbid(unsafe_code)]
-  src/fsm.rs            #   状态 × 事件迁移矩阵（纯函数，宿主机全表穷举）[已实现]
-  src/fsm/tests.rs      #   迁移矩阵全表穷举测试 [已实现]
-  src/policy.rs         #   策略参数：门限/降额/盲推窗口/清故障窗口 [已实现]
-  src/gate.rs           #   四维结构门 + χ² 与发布判据 [已实现]
-  src/gate/accum.rs     #   正规方程累加器、组窗/半窗两级 χ² [已实现]
-  src/gate/math.rs      #   闸门专用常量与判据辅助 [已实现]
-  src/gate/tests.rs     #   门控回归测试 [已实现]
-  src/encoder.rs        #   MT6701 门面：帧解析 + 监控器 [已实现]
-  src/encoder/frame.rs  #   24 bit 帧、CRC-6、状态位、全 0 护栏 [已实现]
-  src/encoder/monitor.rs#   四方接受判据、丢失拍放宽、两帧去抖 [已实现]
-  src/encoder/tests.rs  #   编码器回归测试 [已实现]
-  src/foc.rs            #   Clarke/Park/逆 Park + 无 libm 正余弦 [已实现，移植 calebfletcher/foc]
-  src/foc/tests.rs      #   变换与正余弦精度测试 [已实现]
-  src/svpwm.rs          #   几何扇区 SVPWM + 比较值换算 [已实现，移植 oxifoc]
-  src/svpwm/tests.rs    #   矢量还原、扇区表、寄存器范围 [已实现]
-  src/sense.rs          #   原始码 → 安培（折叠标度 + 零位码）[已实现，移植 oxifoc]
-  src/sense/tests.rs    #   零位、单码标度、通道顺序 [已实现]
-  src/pid.rs            #   电流环 PI（条件积分抗饱和）[已实现，移植 calebfletcher/foc + 本地限幅]
-  src/pid/tests.rs      #   比例、积分收敛、抗饱和 [已实现]
-  src/current.rs        #   dq 电流环：PI + 解耦 + BEMF + d 优先电压圆 [已实现]
-  src/current/tests.rs  #   一阶 RL、电压圆、d 优先、NaN 兜底、接管预置 [已实现]
-  src/supervisor.rs     #   任务心跳 + 命令超时，纯状态机，锁存需显式清除 [已实现]
-  src/supervisor/tests.rs # 窗口边界、任务停摆、锁存不复位 [已实现]
-  src/math.rs           #   共享无 libm 原语（sqrt_f32 / SQRT3）[已实现]
-  # calib.rs / safety.rs 不另建：相对增益估计与可信性判据已在 gate.rs（ADR-12）
+software/algorithms/                 # 纯算法（包名 algorithms），no_std + forbid(unsafe)，x86 可测
+  src/lib.rs            #   #![no_std] #![forbid(unsafe_code)]；公共头
+  src/joint/mod.rs      #   joint 模块树
+  src/joint/service_fsm.rs       #   状态 × 事件迁移矩阵 [已实现]
+  src/joint/service_fsm/tests.rs #   迁移矩阵全表穷举测试 [已实现]
+  src/joint/service_supervisor.rs       #   心跳 + 命令超时 [已实现]
+  src/joint/service_supervisor/tests.rs #   窗口边界/停摆/锁存 [已实现]
+  src/motor/mod.rs      #   motor 模块树
+  src/motor/config_motor.rs      #   WK4310H 铭牌参数与每相/磁链换算 [已实现]
+  src/motor/config_policy.rs     #   策略参数 [已实现]
+  src/motor/service_gate.rs      #   四维结构门 + χ² [已实现]
+  src/motor/service_gate/accum.rs#   正规方程累加器/组窗/半窗 [已实现]
+  src/motor/service_gate/math.rs #   闸门专用常量 [已实现]
+  src/motor/service_gate/tests.rs#   门控回归测试 [已实现]
+  src/motor/service_encoder.rs       #   MT6701 帧解析 + 监控器 [已实现]
+  src/motor/service_encoder/frame.rs #   24 bit 帧/CRC-6/状态位 [已实现]
+  src/motor/service_encoder/monitor.rs # 接受判据/丢失拍放宽 [已实现]
+  src/motor/service_encoder/tests.rs #   编码器回归测试 [已实现]
+  src/motor/chain_foc.rs       #   Clarke/Park/逆 Park [已实现]
+  src/motor/chain_foc/tests.rs #   变换与正余弦精度测试 [已实现]
+  src/motor/chain_svpwm.rs       #   几何扇区 SVPWM [已实现]
+  src/motor/chain_svpwm/tests.rs #   矢量还原/扇区表/输出边界 [已实现]
+  src/motor/chain_sense.rs       #   原始码到安培 [已实现]
+  src/motor/chain_sense/tests.rs #   零位/标度/通道顺序 [已实现]
+  src/motor/chain_pid.rs         #   电流环 PI [已实现]
+  src/motor/chain_pid/tests.rs   #   比例/积分/抗饱和 [已实现]
+  src/motor/chain_current.rs     #   dq 电流环 [已实现]
+  src/motor/chain_current/tests.rs # 一阶 RL/电压圆/接管预置 [已实现]
+  src/motor/service_math.rs      #   共享无 libm 原语 [已实现]
+  # calib/safety 不另建：相对增益估计与可信性判据已在 service_gate（ADR-12）
 
-4_app/                  # 装配（包名 app，bin）
+software/app/                  # 装配（包名 app，bin）[未建]
   src/main.rs           #   #[app(device = ..., peripherals = false)]
-  src/init.rs           #   上电顺序：时钟校验→自检→外设→任务
-  src/tasks/current.rs  #   prio 8：20 kHz 电流环（唯一碰 ADC/DMA 的任务）
-  src/tasks/can.rs      #   prio 5
-  src/tasks/calib.rs    #   prio 2（软件 dispatcher）
-  src/tasks/io.rs       #   prio 1：executor.run()，跑 USB/UART 的 async 外壳
-  src/fault.rs          #   #[panic_handler] + HardFault（unsafe 第二处）
-  src/sections.rs       #   #[link_section] 保留段与 magic
+  src/app/joint/service_init.rs    #   上电顺序：时钟校验→自检→外设→任务
+  src/app/joint/task_io.rs         #   prio 1：executor.run()
+  src/app/joint/service_fault.rs   #   #[panic_handler] + HardFault
+  src/app/joint/config_sections.rs #   #[link_section] 保留段与 magic
+  src/app/motor/task_current.rs    #   prio 8：20 kHz 电流环
+  src/app/motor/task_calib.rs      #   prio 2：软件 dispatcher
+  src/app/motor/task_can.rs        #   prio 5：CAN
+  src/app/motor/task_telemetry.rs  #   prio 5：遥测
 
-firmware/               # 现有模板（独立 workspace，单 bin blinky，无电机代码）
-  src/bin/blinky.rs     #   RTIC + embassy init 探针；不是交付路径
+software/firmware/               # 现有探针（独立 workspace，单 bin main，无电机代码）
+  src/bin/main.rs       #   S0 bring-up：时钟读回 / Board 所有权 / 一次 ADC 采样
 ```
 
-> **一处修正**：async 任务的**外壳**放 `4_app/src/tasks/io.rs`，业务函数放 `3_user`。
-> 若把 `#[embassy_executor::task]` 写进 `3_user`，user 就依赖了执行器，I1 与 I2 同时破。
+> **一处修正**：async 任务的**外壳**放 `software/app/src/tasks/io.rs`，业务函数放 `algorithms`。
+> 若把 `#[embassy_executor::task]` 写进 `algorithms`，user 就依赖了执行器，I1 与 I2 同时破。
 
-## 3. `0_contracts`：三个模块的分工
+## 3. `contracts`：三个模块的分工
 
 ### 3.1 `snapshot.rs` —— 快环↔慢环的唯一通道
 
@@ -162,7 +237,7 @@ None
 | `window_margin` / `dropped` | u16 | 窗口余量 / 丢弃计数 |
 | `seq_hint` | u32 | 帧序号低 32 位，LA 与帧对时用 |
 
-上行快照（≤24 B）：`{ t_us: u64, dq: [f32;2], mode: u8, seq: u8 }` + 填充到 24。
+上行快照（24 B）：`{ t_us: u64, dq: [f32;2], mode, seq, flags, rsvd0, ttl_ms, bench_phase, bench_amps_10ma }`（`CmdView`，无填充）。
 
 两个快照各自定长、各自一个具体类型（`FastSnapshot` = 16 word / `CmdSnapshot` = 6 word），
 **不用 `const N` 泛型参数**——避免同一份代码在不同 N 上被单态化多次。
@@ -199,8 +274,8 @@ pub const TRC_Q: usize = 8;
 ### 3.3 跨层接口 —— 具体类型 + enum，不做运行时分发
 
 设备族在本板是封闭的：一种桥（MP6540HA）、一种编码器（MT6701）。整机三类电机
-（RM/DM/UT）同样按 enum 分派，不写成通用库。驱动对象只有一个主人：`1_bsp::init()`
-构造，move 进 `4_app`；`3_user` 只收定长数据与具体算法类型（AGENTS §1.1 MECH-01/02）。
+（RM/DM/UT）同样按 enum 分派，不写成通用库。驱动对象只有一个主人：`bsp::init()`
+构造，move 进 `app`；`algorithms` 只收定长数据与具体算法类型（AGENTS §1.1 MECH-01/02）。
 
 ```rust
 /// 构造点产出确定已初始化的具体类型；热路径不查 Option。
@@ -215,10 +290,10 @@ impl Board {
 }
 ```
 
-`3_user` 只依赖 `contracts`；需要硬件时由 `4_app` 把 `&mut Board` 传进去，单板单实例，
+`algorithms` 只依赖 `contracts`；需要硬件时由 `app` 把 `&mut Board` 传进去，单板单实例，
 最多一个泛型参数，禁 trait object。`Snapshot<T>` 是跨任务唯一的最新值通道（PRE-04）。
 
-## 4. `1_bsp`：所有权表与两处 unsafe
+## 4. `bsp`：所有权表与两处 unsafe
 
 | 外设 | 归属 | 理由 |
 |---|---|---|
@@ -242,17 +317,17 @@ impl Board {
 //      不一致 → 直接走 fault dump（不静默继续）。
 ```
 
-## 5. `2_system` / `3_user` 的边界
+## 5. `system` / `algorithms` 的边界
 
-- `2_system` 里**不许出现** `stm32*` / `embassy_stm32` / `embassy_executor` / `rtic*` 字样
+- `system` 里**不许出现** `stm32*` / `embassy_stm32` / `embassy_executor` / `rtic*` 字样
   （`embassy-sync` 允许：它是纯 `no_std`、无芯片依赖、无分配，队列就靠它）；
-  它只从 `contracts` 取类型；需要硬件时由 `4_app` 以 `&mut` 传入具体实现（单板单实例，
+  它只从 `contracts` 取类型；需要硬件时由 `app` 以 `&mut` 传入具体实现（单板单实例，
   最多一个泛型参数，禁 trait object）。
-- `3_user` 里**不许出现** `1_bsp`、不许 `usize` 下标越界风险（`deny(clippy::indexing_slicing)`）、不许 `unwrap`。
-- `2_system` 与 `3_user` 均 `deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)`；
+- `algorithms` 里**不许出现** `bsp`、不许 `usize` 下标越界风险（`deny(clippy::indexing_slicing)`）、不许 `unwrap`。
+- `system` 与 `algorithms` 均 `deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)`；
   `arithmetic_side_effects` 只对整数部分启用（对 `f32` 太严）。
 
-## 6. `4_app`：任务表与上电顺序
+## 6. `app`：任务表与上电顺序
 
 | prio | 任务 | 绑定 | 周期 | 预算 |
 |---|---|---|---|---|
@@ -291,22 +366,22 @@ const _: () = assert!(size_of::<Event>() <= 32);
 
 ## 9. 检查手段（CI，`cargo xtask arch`）
 
-实现在 `xtask/src/checks.rs`（纯 Rust，无 shell 依赖）。
+实现在 `software/xtask/src/checks.rs`（纯 Rust，无 shell 依赖）。
 
-1. `cargo tree -p user | grep -E "bsp|embassy-stm32|embassy-executor|rtic"` → 必须为空；
+1. `cargo tree -p algorithms | grep -E "bsp|embassy-stm32|embassy-executor|rtic"` → 必须为空；
 2. `cargo tree -p system | grep -E "stm32|embassy-stm32|embassy-executor|rtic"` → 必须为空；
-3. `grep -rn "unsafe" 0_contracts/src 2_system/src 3_user/src` → 必须为空；
-4. `grep -rn "await\|defmt\|\.lock()" 4_app/src/tasks/current.rs` → 必须为空；
+3. `grep -rn "unsafe" software/contracts/src software/system/src software/algorithms/src` → 必须为空；
+4. `grep -rn "await\|defmt\|\.lock()" software/app/src/tasks/current.rs` → 必须为空；
 5. `llvm-nm target/.../app | grep __rust_alloc` → 必须为空；
 6. `cargo build --release && llvm-objcopy -O binary`，统计 Flash/RAM 占用写进 CI 日志；
-7. I7：`MotorState` 只允许在 `0_contracts/src/fsm.rs`、`3_user/src/fsm.rs` 与两处 crate 根出现
+7. I7：`MotorState` 只允许在 `software/contracts/src/joint/protocol_fsm.rs`、`software/algorithms/src/joint/service_fsm.rs` 与两处 crate 根出现
    （其余文件拿到它就能写第二条迁移路径）。
 
-8. **待落地**（`1_bsp`/`2_system`/`4_app` 建好后再接进 `cargo xtask arch`）：MECH-01 的
+8. **待落地**（`bsp`/`system`/`app` 建好后再接进 `cargo xtask arch`）：MECH-01 的
    `static mut`/`static Option<驱动>` grep、MECH-02 的 `dyn` grep、MECH-03 的热路径签名 grep、
    MECH-04 的 `core::fmt` 符号审查。未建 crate 的检查记为 N/A，不计 PASS。
 
-9. 协作门禁（`cargo xtask hygiene`，落点见 [`agent-guardrails.md`](agent-guardrails.md)）：
+9. 协作门禁（`cargo xtask hygiene`，落点见 [`agent-guardrails.md`](archive/agent-guardrails.md)）：
    H2 的 `TODO(owner, trigger)`、H5 的注释标记，以及 H4 —— 每个 `<crate>/src/**/*.rs`
    必须出现在上面 §2 的文件树块里。新增模块不写文档即 FAIL。
 
@@ -314,4 +389,4 @@ const _: () = assert!(size_of::<Event>() <= 32);
 
 1. **三路 ADC 的"采完"信号**：挂在 ADC3 EOC 还是读上一拍（建议后者，确定性最好）→ 决定 `take_sample()` 语义。
 2. **`embassy_stm32::init()` 与裸 PAC 单例的衔接**：需 30 行探针确认（`steal()` 还是从返回的 Peripherals 里取）。
-3. **`3_user` 的测试载体**：`tests/` 用 host `cargo test` + `fixtures/*.bin`，还是单独 `tools/replay`。建议后者，`3_user` 只留最小单测。
+3. **`algorithms` 的测试载体**：`tests/` 用 host `cargo test` + `fixtures/*.bin`，还是单独 `tools/replay`。建议后者，`algorithms` 只留最小单测。

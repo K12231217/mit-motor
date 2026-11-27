@@ -1,0 +1,153 @@
+# 参考实现清单（草稿 v0.1）
+
+> 用途：把每个子系统落到具体文件，标明「能翻译 / 只能参考 / 必须自己设计」，作为编码工作的输入清单。
+> 来源：GitHub 仓库调研（50 个，见 `~/research/repos.jsonl` 与批次文件）；文献结论见 [research-findings.md](research-findings.md)，结构约束见 [hardware-facts.md](hardware-facts.md)。
+
+## 1. 结论先说
+
+- **关节级没有 Rust 实现**：CAN FD + MIT 协议 + 多圈绝对角 + 电流标定冻结，这四块在 Rust 生态里找不到成品。
+- **组件级并不少**：FOC 数学、电流采样抽象、角度传感器驱动、CAN/USB 任务骨架、上位机 + ICD，Rust 侧都有可用代码。
+- 其他语言里，ODrive / VESC / SimpleFOC / moteus 覆盖了我们需要的全部子系统，但**只有纯算法可以直接翻译**，其余是「借配置参数与结构」。
+
+## 2. Rust 侧现状
+
+| 项目 | 运行时 | 分层 | 可直接借鉴的部分 |
+|---|---|---|---|
+| `gulitsky/reactance` | RTIC 1.1 + `stm32g4` PAC（**裸寄存器，无 HAL**）| 单 crate + `dsp/` | G4 上跑通整机 FOC 的实证；`dsp/src/transforms.rs` 的变换实现 |
+| `qff233/FOC` | embassy（executor + usb + sync）| `crates/foc`（硬件无关）+ `crates/stm32-g474` | **骨架最接近我们**：`foc/src/current_sensor.rs`、`angle_sensor/`（含 mt6818）、`driver/interface.rs`、`pid.rs`、`lowpass.rs`；平台侧 `task/{foc,can_comm,usb_comm}.rs` |
+| `okhsunrog/oxifoc` | embassy，core 内 embassy 依赖全部 optional（`runtime` feature，host 可用 tokio）| `oxifoc-core` + `oxifoc-bridge` | `foc/current_sense.rs`、`foc/current_offset.rs`、`foc/detection/`、ICD 与交付策略 |
+| `calebfletcher/foc` | 无运行时（纯库）+ 独立 GUI | `src/`（`park_clarke.rs`、`pid.rs`、`pwm.rs`）+ `gui/{gui,icd,firmware}` | **「算法库 + ICD + GUI」三件套的先例**，正好对上我们的 USB 上位机需求 |
+| `trouverun/rust-stm32g4` | 平台层在独立 crate | `field-oriented/{commission,control,estimation}` + `bootloader` | 电角度辨识、HFI、弱磁、估计器仲裁 |
+
+共同形状：**纯算法 crate 与平台 crate 分离**。三家独立项目都这么做，我们照做。
+
+## 3. 子系统映射
+
+| 子系统 | 参考实现（文件）| 规模 | 改写性质 | 优先级 |
+|---|---|---|---|---|
+| 采样触发链 TIM1→ADC→DMA | ODrive `Firmware/MotorControl/low_level.cpp`（15 KB）| 中 | **参考配置**：触发源、采样时刻、DMA 布局按 G491 重写 | P0 |
+| 低边三电阻采样 | SimpleFOC `src/current_sense/LowsideCurrentSense.cpp` | 中 | **可翻译**：零偏计算、多采样点、增益换算 | P0 |
+| 电流零点/增益标定 | ODrive `MotorControl/motor.cpp`（26 KB）的 current-offset 段 | 小 | **可翻译** 算法，流程需重设计（三 ADC 同步、零和约束）| P0 |
+| FOC 数学 | ODrive `foc.cpp`（6.9 KB）、VESC `motor/foc_math.c`；**Rust 已有** `qff233`、`calebfletcher` | 小 | **直接用 Rust 实现**，不要自己推公式 | P0 |
+| 编码器 PLL / 偏置 | ODrive `encoder.cpp`（31 KB）、moteus `fw/absolute_encoder_validator.h` | 中 | 结构借鉴；游标绝对角为新增 | P1 |
+| 运行状态机 | ODrive `axis.cpp`（23 KB）的 AxisState、moteus `fw/bldc_servo_position.cc` | 中 | **结构借鉴**，语义按我们的 LATENT/ACTIVE/FAULT 重写 | P1 |
+| 控制器与前馈 | ODrive `controller.cpp`（18 KB）| 中 | 可翻译（位置/速度/电流串级 + 前馈）| P1 |
+| CAN 帧与协议 | ODrive `communication/can/`、`interface_can.hpp`；moteus `lib/` | 小 | **帧格式参考**，实现重写 | P1 |
+| 保护策略 | VESC `motor/mcpwm_foc.c` 保护段、SimpleFOC `src/common/base_classes/FOCMotor.cpp` | 小 | **阈值与策略参考**，实现重写 | P1 |
+| 配置持久化 | ODrive `nvm_config.hpp` | 小 | 重写（flash + CRC + 版本号）| P2 |
+| 上位机 | ODrive `odrivetool`、VESC `bldc-tool`、moteus `tview` | — | 只借 UI 思路与 ICD 概念 | P2 |
+
+**反面教材**：VESC 的 `motor/mcpwm_foc.c` 有 **176 KB**，把 FOC、采样、观测器、保护全部塞进一个文件。我们按 `motor-core` 的模块边界切，不复制这种形状。
+
+## 4. 改写性质的定义
+
+- **可翻译**：输入输出是纯数值，没有 RTOS 假设。翻成 f32、写 host 测试向量，逐条对齐输出。
+- **参考配置**：代码里有效的是寄存器配置值和时序约束（触发源、采样窗口、死区、DMA 模式），不是控制流。
+- **结构借鉴**：借状态划分、模块边界、错误分类；实现全部重写。
+- **自己设计**：没有现成答案（见 §6）。
+
+**禁止逐行翻译。** ODrive 在 FreeRTOS、VESC 在 ChibiOS，它们的 C 代码大量依赖「当前中断优先级下可以做什么」的隐含假设（ADC 中断里直接浮点运算、DMA 半传输中断里读半缓冲）。这些假设搬进 RTIC 全部失效。
+
+## 5. 关键模块契约（草案）
+
+```rust
+// motor-core::sense
+pub struct RawSample { pub code: [u16; 3], pub vref_mv: u16 }
+pub struct PhaseCurrent { pub amps: [f32; 3], pub valid: bool, pub residual_ma: f32 }
+pub fn to_amps(raw: &RawSample, cal: &CalibActive) -> PhaseCurrent;
+
+// motor-core::calib
+pub enum CalibState { Idle, Collecting, Converged, Frozen, LatchedFault }
+pub struct Estimator; // RLS on sum(i)=0
+impl Estimator {
+    pub fn push(&mut self, cur: &PhaseCurrent, ctx: &SampleCtx) -> Option<CalibLatent>;
+    pub fn state(&self) -> CalibState;
+    pub fn freeze(&mut self, reason: FreezeReason);
+}
+
+// motor-core::foc
+pub struct DqTarget { pub id: f32, pub iq: f32 }
+pub fn current_loop(i_abc: &[f32; 3], theta_e: f32, target: DqTarget, pi: &mut Pi) -> Duty;
+
+// motor-icd
+pub enum Frame { Command(Cmd), Feedback(Feedback), Trace(TraceChunk) }
+```
+
+契约写进 `motor-icd` 之后，`motor-core` 的测试只依赖这些结构体，与芯片无关。
+
+## 6. 没有现成实现、必须自己设计的四块
+
+1. **CAN FD + MIT 协议**的关节接口（帧布局、超时、主权切换）。
+2. **多圈绝对角**：30/31 齿游标解算 + 上电找零 + 与 FOC 用角的关系。
+3. **标定的可信状态机**：何时更新、何时冻结、何种残差算故障——这是毕设主线。
+4. **G491 + MP6540H 的具体时序**：EN 与 PWM 的语义差、BKIN 刹车/停机的区别、三 ADC 同步触发。
+
+## 7. 待补
+
+- 论文侧已完成 41 篇归纳，见 [research-findings.md](research-findings.md)；P2（集成驱动片上采样）与部分 2025–2026 方法因 OpenAlex 配额停在 41/60，可换 Crossref/arXiv 补齐。
+- `g0_gimbal_motor`（唯一使用 MP6540 的仓库）尚未逐文件读，需补采样与 PWM 配置对照。
+- `trouverun/rust-stm32g4` 的平台层运行时待确认。
+
+## 8. 已移植（2026-11-21，ADR-12）
+
+只取许可证允许修改与再分发的实现；每个文件头部保留上游仓库、提交号与许可证。
+
+| 上游 | 许可证 | 提交 | 上游文件 | 本地落点 | 本地改动 |
+|---|---|---|---|---|---|
+| [`calebfletcher/foc`](https://github.com/calebfletcher/foc) | Apache-2.0 | `1db0260` | `src/park_clarke.rs` | `software/algorithms/src/motor/chain_foc.rs` | `I16F16` → `f32`；加量纲后缀；未移植 `inverse_clarke` |
+| 同上 | Apache-2.0 | `1db0260` | `src/pwm.rs`（`SpaceVector`） | `software/algorithms/src/motor/chain_svpwm.rs` | `f32`、`enum Sector`（消掉 `unreachable!`）、比较值 API |
+| 同上 | Apache-2.0 | `1db0260` | `src/pid.rs`（`PIController`） | `software/algorithms/src/motor/chain_pid.rs` | 加输出限幅与条件积分（源码无抗饱和） |
+| [`okhsunrog/oxifoc`](https://github.com/okhsunrog/oxifoc) | Apache-2.0 | `3d48332` | `oxifoc-core/src/foc/svpwm.rs` | `software/algorithms/src/motor/chain_svpwm.rs` | 与上表的扇区实现合并，取 oxifoc 的扇区判据与作用时间 |
+| 同上 | Apache-2.0 | `3d48332` | `oxifoc-core/src/foc/current_sense.rs` | `software/algorithms/src/motor/chain_sense.rs` | 去掉 `shunt`/`opamp_gain`（MP6540 内部检测），保留折叠标度与零位码 |
+| [`tarcieri/micromath`](https://github.com/tarcieri/micromath) | MIT OR Apache-2.0 | `eb73416` | `src/float/{sin,cos}.rs` | `software/algorithms/src/motor/chain_foc.rs`（私有） | `floor` 用截断 + 修正实现（`core` 无 `floor`） |
+
+> 未采用的候选：`qff233/FOC` 的 `license` 字段为 `null`，按 `open-source-reuse.md` 不复制源码；
+> `gulitsky/reactance` 为 `NOASSERTION`，同样只做结构参考。
+
+## 9. 本地参考源码（`docs/ref/`，不进仓）
+
+`docs/ref/` 已在 `.gitignore` 排除（上游代码不是本仓产物）。2026-11-22 拉取，供实现不确定时查一手代码：
+
+| 目录 | 上游 | 版本 | 许可 | 本地形态 |
+|---|---|---|---|---|
+| `docs/ref/bldc` | `vedderb/bldc` | `6fda11c2`（2026-11-21），`FW_VERSION 7.01` / beta 1 | GPL-3.0 | 完整 clone（含历史），356 MB |
+| `docs/ref/vesc_tool` | `vedderb/vesc_tool` | `04614bf5`（2026-11-21） | GPL-3.0 | `--depth 1` 浅克隆 |
+
+> 首次拉取的 `vesc_tool` 是坏的（`HEAD → refs/heads/.invalid`，零有效对象），已原地修复为重拉；
+> 其 `.git/objects/pack/tmp_pack_kIpUBq` 被外部进程锁定无法删除（48 MB 垃圾），不影响读取。
+
+**入口文件（按问题查，不通读）**：
+
+| 问题 | 看哪里 |
+|---|---|
+| 外设/定时器映射 | `bldc/main.c` 顶部注释；`bldc/hwconf/` |
+| FOC 主循环、观测器、保护 | `bldc/motor/mcpwm_foc.c`（`control_current`、`observer_update`、`pll_run`、`do_dc_cal`）|
+| 变换与 SVM | `bldc/motor/foc_math.c` |
+| 统一控制 API / 状态机 | `bldc/motor/mc_interface.c`、`bldc/datatypes.h` |
+| CAN 帧格式 | `bldc/documentation/comm_can.md`、`bldc/comm/comm_can.c` |
+| 参数辨识 | `bldc/motor/mcpwm_foc.c` 的 detect 段 |
+| 上位机页面与参数定义 | `vesc_tool/pages/page{motor,foc,bldc,motorsettings}.*`、`vesc_tool/configparams.cpp`、`vesc_tool/commands.cpp` |
+
+**使用红线**：
+
+1. **许可是分发问题，不是阅读问题**。毕设私有阶段（不对外分发）GPL-3.0 不触发源码开放义务，
+   参考、改写算法均可用；但仓库一旦公开或随板交付，传染性生效——届时须区分「参考实现」与「搬入代码」。
+   §8 的移植白名单依旧只登记 Apache-2.0 / MIT，避免以后公开时说不清来源。
+2. **版本是 dev 分支**：本地为 7.01 beta，网上 6.x 文章的参数名与界面可能对不上；以本地 commit 为准。
+3. **RTOS 假设不迁移**：bldc 跑 ChibiOS，中断内浮点、DMA 半传输等隐含假设进 RTIC 全部失效（§4）。
+4. 只借**结构 / 阈值 / 时序**；数值仍以 `software/contracts/src/motor/config_hw.rs` / `joint/config_budget.rs` 与器件手册为准（PRE-07）。
+
+## 10. bringup 参考（T-011，第一个纵向切片）
+
+只服务 6 个未知项；每行必须能追到 commit/文件，不扩大调研面。板级第一手来源仍是
+`hardware/pcb/Desktop.ioc`、`hardware/pcb/Netlist_PCB14_2026-11-11.tel` 与 `hardware-requirements.md` §3；
+如果板是 G491RET6，数值按 G491 手册核对，结论只写“G491 bringup”。
+
+| 未知项 | 一手来源 | 参考实现 | 只取什么 | 许可/使用 |
+|---|---|---|---|---|
+| 170 MHz PLL / VOS / boost 与读回 | RM0440 RCC 章；`software/firmware/memory.x` 头注释 | `qff233/FOC` 的 `crates/stm32-g474` 平台层（**尚未逐文件核对**） | 配置顺序与读回校验（PLLN/PLLR/VOS/SWS）；数值按本板手册 | license 为 `null` → 只读结构，不复制 |
+| TIM1 中心对齐、BDTR 死区、AOE=0、BKIN | RM0440 TIM1 章；`hardware-facts.md` §2.4 | VESC `docs/ref/bldc/bldc/hwconf/*`、`motor/mcpwm_foc.c`；ODrive `low_level.cpp` | 寄存器值与死区/刹车语义，不搬控制流 | VESC GPL-3.0 只读；ODrive 按上游 LICENSE |
+| ADC 注入组 + TIM1_TRGO2 + JEOS + DMA | RM0440 ADC/DMA 章；HR-201/202 | 同上 | 触发源、采样时刻、DMA 布局、窗口判据 | 同上 |
+| RTIC 2.4 + embassy 的所有权 move | RTIC book；`rtic-rs/rtic` 的 `examples/embassy-stm32g4`（模板来源 `832307d8`） | `qff233/FOC` 的 task 切分；`gulitsky/reactance` 的 RTIC 1.1 结构 | `peripherals = false`、`spawn` 传驱动的机制；**不要**照搬 RTIC 1.1 API | qff233 `null` / reactance `NOASSERTION` → 只读结构 |
+| MP6540HA 六输入真值表 / nSLEEP / nFAULT | MP6540HA datasheet；`hardware-facts.md` §2.2 | `g0_gimbal_motor`（唯一 MP6540 仓库，**尚未逐文件读**） | 引脚语义、故障行为；先确认是 H 还是 HA 版本 | 按上游 LICENSE；只读结构 |
+| MT6701 SPI 时序 | MT6701 datasheet | 已实现（`software/algorithms/src/motor/service_encoder/frame.rs`），无需再找 | CPOL/CPHA、CS 建立/保持 | 不适用 |

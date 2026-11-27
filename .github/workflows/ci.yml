@@ -33,7 +33,7 @@ jobs:
       # H2/H4/H5: no ownerless TODO, no history/process comments, every module
       # file listed in docs/software-architecture.md.
       - run: cargo xtask hygiene
-      # H3: Tier B paths (firmware/, 1_bsp/, 2_system/, 4_app/) need a
+      # H3: Tier B paths (software/firmware/, software/bsp/, software/system/, software/app/) need a
       # `HIL: PASS` line in .scratch/handoff.md. A FAIL here is the gate
       # working: keep the change on a hil-pending branch instead.
       - name: Tier gate (push)

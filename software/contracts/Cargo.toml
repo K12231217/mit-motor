@@ -1,0 +1,13 @@
+# contracts —— 契约 crate。
+# 仓库根 workspace 的成员（见 ../Cargo.toml）：`cargo test --workspace` 从这里运行。
+# 零依赖是硬要求（PRE-01 无堆 / PRE-07 数值唯一来源 / 上位机可直接复用这些类型）。
+[package]
+name = "contracts"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
