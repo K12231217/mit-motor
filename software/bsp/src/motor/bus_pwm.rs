@@ -138,6 +138,12 @@ impl Pwm {
             w.set_ois1n(false);
             w.set_ois2n(false);
             w.set_ois3n(false);
+            // MMS2=0010: update event drives TIM1_TRGO2, the injected-group
+            // trigger for ADC1/2/3 (RM0440 §29.3.31, CR2.MMS2).
+            let mut bits = w.0;
+            bits &= !(0xF << 20);
+            bits |= 0b0010 << 20;
+            w.0 = bits;
         });
         r.bdtr().modify(|w| {
             w.set_dtg(deadtime_dtg());
@@ -187,13 +193,16 @@ impl Pwm {
     pub fn wake(&mut self) -> Result<(), PwmFault> {
         self.n_sleep.set_high();
         // nSLEEP 的 1 ms 是 DS 的最小值，实测 nFAULT 会晚于 1 ms 才释放；
-        // 最多等 10 ms，仍低才判故障，避免把正常唤醒当成 nFAULT。
-        cortex_m::asm::delay(SYS_CLK_HZ / 100);
-        if self.n_fault.is_low() {
-            self.n_sleep.set_low();
-            return Err(PwmFault::NfaultLow);
+        // 手动复位时 5V/驱动状态可能更慢，最多等 100 ms。仍低才判故障，
+        // 避免把正常的驱动唤醒当成 nFAULT。
+        for _ in 0..10 {
+            cortex_m::asm::delay(SYS_CLK_HZ / 1_000);
+            if !self.n_fault.is_low() {
+                return Ok(());
+            }
         }
-        Ok(())
+        self.n_sleep.set_low();
+        Err(PwmFault::NfaultLow)
     }
 
     /// 六路全低，三相高阻。

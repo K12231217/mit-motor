@@ -2,14 +2,14 @@
 //!
 //! The current task is hardware-driven by the TIM1 update event. Each ISR:
 //! 1. clears UIF and raises `TP_SYNC_LOOP`,
-//! 2. reads OPAMP1/2/3 → ADC1/2/3 (real samples),
+//! 2. waits for ADC1/2/3 injected JEOS, triggered together by TIM1_TRGO2,
 //! 3. advances `GainGate`, writes the signed residual to DAC1_OUT1,
 //! 4. pushes a 16 B frame into the pre/post-trigger ring,
 //! 5. lowers `TP_SYNC_LOOP`; DWT records the ISR cycles.
 //!
-//! For this bench test the ADC is **software-started regular group** in the TIM1 ISR,
-//! not the final injected-group/TIM1_TRGO2 low-side-window scheme (HR-805). It is a
-//! real ADC residual, but the `window_ok` flag is provisional. MOE stays 0 and no
+//! The ADC path is the injected-group + TIM1_TRGO2 scheme (HR-805); the three
+//! JDR1 results are read in one TIM1_UP ISR. `window_ok` remains provisional until
+//! the current loop enables PWM and checks the low-side window. MOE stays 0 and no
 //! motor is connected.
 //!
 //! After 2000 valid samples the task triggers the recorder and DAC1_OUT2; 1536 post
@@ -98,6 +98,20 @@ mod app {
         }
         defmt::info!("clock=ok (HSE 16M / PLL 170M)");
 
+        // 先把 DAC/TP_SYNC 拉起来：即使后面的驱动唤醒或 ADC 初始化失败，
+        // TP1 也应保持 1.25 V；失败路径把 TP2/PB7 拉高作为可见故障码，
+        // 不再出现“所有输出都没有”的静默死循环。
+        let mut trace = Trace::init(
+            TracePins {
+                dac: p.DAC1,
+                dac_out1: p.PA4,
+                dac_out2: p.PA5,
+                sync_loop: p.PB6,
+                sync_freeze: p.PB7,
+            },
+            TRACE_R_FULL_SCALE_AMPS,
+        );
+
         let mut pwm = Pwm::init(
             p.TIM1,
             PwmPins {
@@ -114,24 +128,24 @@ mod app {
 
         // Wake the driver only (no MOE); the current-sense bias needs nSLEEP high.
         if pwm.wake().is_err() {
+            trace.freeze();
             defmt::error!(
-                "driver=wake fail: nFAULT low, nSLEEP returned low; current task stopped"
+                "driver=wake fail: nFAULT low after 100ms; TP2/PB7 held high as fault code"
             );
             loop {
                 core::hint::spin_loop();
             }
         }
 
-        let trace = Trace::init(
-            TracePins {
-                dac: p.DAC1,
-                dac_out1: p.PA4,
-                dac_out2: p.PA5,
-                sync_loop: p.PB6,
-                sync_freeze: p.PB7,
-            },
-            TRACE_R_FULL_SCALE_AMPS,
-        );
+        #[cfg(feature = "hil-boot-freeze")]
+        {
+            trace.freeze();
+            defmt::info!("hil=boot-freeze 1s (TP2/PB7 high)");
+            // cortex_m::asm::delay's loop is ~3 cycles; /3 gives ~1 s at 170 MHz.
+            cortex_m::asm::delay(SYS_CLK_HZ / 3);
+            trace.unfreeze();
+            defmt::info!("hil=boot-freeze done");
+        }
 
         trace::TRACE.set_stride(trace::DEFAULT_STRIDE);
         let dwt = Dwt::new(cx.core.DWT, cx.core.DCB, SYS_CLK_HZ);
@@ -147,7 +161,8 @@ mod app {
             pa7: p.PA7,
             pb0: p.PB0,
         }) else {
-            defmt::error!("adc=bad: OPAMP/ADC calibrate or ready timeout");
+            trace.freeze();
+            defmt::error!("adc=bad: OPAMP/ADC calibrate or ready timeout; TP2/PB7 fault");
             loop {
                 core::hint::spin_loop();
             }
@@ -167,7 +182,8 @@ mod app {
             }
         }
         if n == 0 {
-            defmt::error!("adc0=bad: no sample during zero snapshot");
+            trace.freeze();
+            defmt::error!("adc0=bad: no sample during zero snapshot; TP2/PB7 fault");
             loop {
                 core::hint::spin_loop();
             }
@@ -203,7 +219,8 @@ mod app {
 
         let mut gate = GainGate::new(GateParams::FROZEN);
         if !gate.set_zero_lsb(zero) {
-            defmt::error!("gate=bad: zero outside plausible window");
+            trace.freeze();
+            defmt::error!("gate=bad: zero outside plausible window; TP2/PB7 fault");
             loop {
                 core::hint::spin_loop();
             }

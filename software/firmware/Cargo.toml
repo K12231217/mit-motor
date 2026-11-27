@@ -36,6 +36,11 @@
 # Do NOT re-enable `memory-x` alongside this file; the linker would see
 # two memory.x files.
 
+[features]
+default = []
+# HIL-only: hold DAC2/TP2 and PB7 high for 1 s at reset for probe capture.
+hil-boot-freeze = []
+
 [package]
 edition = "2021"
 name = "mit-motor"

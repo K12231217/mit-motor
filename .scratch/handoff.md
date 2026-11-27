@@ -7,9 +7,9 @@
 
 | ID | 模式 | 目标 | 冻结/基线 | 状态 |
 |---|---|---|---|---|
-| T-015 | B | 20 kHz current task：TIM1_UP → OPAMP/ADC → GainGate 残差 → DAC/TP_SYNC/录波 | T-014 HIL 后 | **HIL PASS（ADC/rate/DAC）**：`adc0≈2038`、`r_lsb≈-1`、`isr_count=20013/s`；TP1=1.2623 V、TP2 静态保持=2.496 V；`enable` 波形未测 |
+| T-015 | B | 20 kHz current task：TIM1_UP → OPAMP/ADC → GainGate 残差 → DAC/TP_SYNC/录波 | T-014 HIL 后 | **HIL PASS（ADC/rate/DAC/freeze）**：`adc0≈2038`、`r_lsb≈-1`、`isr_count=20013/s`；TP1=1.2623 V、TP2 静态=2.496 V；实测 boot-freeze 1 s，随后 100 ms 自动触发 76.8 ms；`enable` 波形未测 |
 | T-014 | B | trace 基础设施：PB6/PB7 TP_SYNC、DAC1_OUT1 残差/OUT2 冻结、TIM5 1 MHz、DWT、512/1536 预/后触发环与 `stride` | T-012 HIL 后 | **HIL: PASS（RTT/寄存器）**：`recorder pre=512 post=1536 len=2048`；stride 1/10 均锁存；物理 DAC/TP_SYNC 未测 |
-| T-012 | B | `bsp` clock + pwm：HSE 16M/PLL 170M 读回；TIM1 20 kHz/500 ns；按 2026-11-27 网表 nSLEEP PC7、nFAULT PC8、无 BKIN | `4f67b32`（T-011 脚手架） | **HIL: PASS（safe-off）**：RTT `clock=ok`、`pwm=ok arr=4250 dtg=85 moe/aoe/bke=false`；`enable` 波形与 LA 未做；硬件过压 break 缺口待补 |
+| T-012 | B | `bsp` clock + pwm：HSE 16M/PLL 170M 读回；TIM1 20 kHz/500 ns；按 2026-11-27 网表 nSLEEP PC7、nFAULT PC8、无 BKIN | `4f67b32`（T-011 脚手架） | **HIL: PASS（safe-off）**：RTT `clock=ok`、`pwm=ok arr=4250 dtg=85 moe/aoe/bke=false`；定时器/死区已按 RM0440 对照（RCR=1、DTG=85→500 ns），`enable` 门极波形因 U9 探头不可达 `BLOCKED`；硬件过压 break 缺口待补 |
 
 ## 2. 当前工作区
 
@@ -50,7 +50,11 @@ HIL: PASS 2026-11-27 T-015 20 kHz current task（ADC/rate）
   raw 509 是 1.247 V 的 10-bit 码。按 `CFGR[4:3]=00` 后恢复 12 bit。
 - `Pwm::wake()` nSLEEP 等待改为 10 ms，`nFAULT` 不再偶发低。
 - 已测：TP1=1.2623 V；`cargo xtask dac 2 4095` 静态保持时 TP2=2.496 V（DAC2/DOR2=4095）。
-- 未做：真实 76.8 ms 冻结脉冲的示波器单次捕获、`enable` 20 kHz/500 ns 波形与死区 LA；注入组/TIM1_TRGO2 仍待实现。
+- 已测：`hil --boot-freeze` 先给 1 s 高；boot 结束后约 100 ms 又出现 76.8 ms 自动触发高脉冲，二者均约 2.49 V。
+- 已实现并 HIL 通过：ADC1/2/3 注入组 + TIM1_TRGO2 + 三路 JDR1。
+- HIL：`adc0 a/b/c≈2039`、`isr_count=20004/s`、`isr_cycles≈2005`、`errors=0`；注入组必须 `JQDIS=1` 且 `JADSTART=1`（RM0440 §21.4.15/§21.4.18）。
+- 未做：`enable` 20 kHz/500 ns 波形与死区 LA；低边窗口判定。
+- 复位启动：`Trace` 提前初始化；`Pwm::wake` 的 nFAULT 等待从 10 ms 放宽到 100 ms；wake/ADC/零位/门控失败时 TP2+PB7 常高作故障码。20 次 SWD 复位均正常，但手动复位“全无输出”尚未复现；若再出现，先看 TP2/PB7 是否常高。
 
 ## 4. 待裁决（人）
 

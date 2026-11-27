@@ -36,6 +36,7 @@ cargo xtask arch         # I1/I2/I3/I7
 cargo xtask hygiene      # H2/H4/H5/H6
 cargo xtask flash        # probe-rs（芯片名在 software/firmware/.cargo/config.toml）
 cargo xtask hil          # 编译+烧录+RTT，日志落 .scratch/hil/run.log
+cargo xtask hil --boot-freeze  # 复位后 TP2/PB7 保持约 1 s，便于探头抓
 cargo xtask rtt          # 只 attach 当前运行，不重新烧录
 cargo xtask dac 2 4095   # 台架静态拉高 DAC2/TP2，便于万用表测
 ```

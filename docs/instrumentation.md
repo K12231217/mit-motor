@@ -161,6 +161,9 @@ DATA,k,ia_raw,ib_raw,ic_raw,r_lsb,flags
 
 ```sh
 cargo xtask hil
+
+# 探头抓不到 76.8 ms 瞬态时：复位后先保持 TP2/PB7 高约 1 s
+cargo xtask hil --boot-freeze
 ```
 
 它做三件事：
@@ -186,6 +189,9 @@ cargo xtask hil
 cargo xtask rtt
 ```
 
+若复位后 **TP1 有 1.25 V、TP2/PB7 常高、PB6 没有 20 kHz**，不是芯片卡死，是初始化在某一步停下：
+`Pwm::wake`（nFAULT 100 ms 仍低）、ADC 校准/零位或门控零位失败都会走这条可见故障码。
+RTT 会给出对应的 `driver=wake fail` / `adc=bad` / `adc0=bad` / `gate=bad`。
 TP2 的冻结脉冲只有约 **76.8 ms**，万用表/自动触发容易错过。需要静态测 DAC 时，直接按住通道：
 
 ```sh
@@ -227,4 +233,6 @@ current errors=0 isr_cycles=1952 isr_count=20013 ...
   raw 509 是 1.247 V 的 10-bit 码。按 G474 `CFGR[4:3]=00` 后恢复 12 bit。
 - `Pwm::wake()` 的 nSLEEP 等待从 1 ms 放宽到 10 ms，`nFAULT` 不再偶发低。
 - 已测：TP1=1.2623 V；`cargo xtask dac 2 4095` 保持时 TP2=2.496 V。
-- 未做：真实 76.8 ms 冻结脉冲的单次捕获、`enable` 波形/死区 LA、注入组/TIM1_TRGO2。
+- 已测：`hil --boot-freeze` 的 1 s 高脉冲；结束后约 100 ms，自动触发再产生 76.8 ms 高脉冲（2000 样本 @20 kHz + 1536 后触发）。
+- 已实现并 HIL 通过：注入组/TIM1_TRGO2。RTT `adc0≈2039`、`isr_count=20004/s`、`errors=0`；注入触发要求 `JQDIS=1`、`JADSTART=1`。
+- 未做：`enable` 波形/死区 LA、低边窗口判定。

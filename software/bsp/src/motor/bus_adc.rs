@@ -1,17 +1,20 @@
-//! ADC1/2/3 电流采样（T-013 过渡实现）。
+//! ADC1/2/3 电流采样（T-013：注入组 + TIM1_TRGO2）。
 //!
 //! 当前板：`SOC→OPAMP1→ADC1_IN13`、`SOB→OPAMP2→ADC2_IN16`、
 //! `SOA→OPAMP3→ADC3_IN13`（A/C 交叉）。本模块把三路 OPAMP 配成 follower，
-//! 在 TIM1 20 kHz 更新中断里**软件启动规则组**并同步读回三路。
+//! 三路 ADC 各配 1 个注入通道，由 TIM1_TRGO2 的更新事件硬件同拍启动；
+//! 电流任务在 TIM1_UP 中断里依次等待 3 个 JEOS，并从各自的 JDR1 读回。
 //!
-//! 这是真实 ADC 路径，但**不是最终低边窗口方案**：注入组 + TIM1_TRGO2 的硬件
-//! 同拍触发尚未落地（HR-805）。`window_ok` 只表示转换完成，不表示落在低边
-//! 采样窗口；20 kHz 闭环前必须替换。
+//! TIM1_TRGO2 的 JEXTSEL 值 0b01000：RM0440 Rev 9 表 167（ADC1/2）与表 169
+//! （ADC3/4/5）均为 `tim1_trgo2`。三路转换由硬件触发，不再软件写 ADSTART。
+//!
+//! `window_ok` 仍是**过渡判据**：本模块只保证注入转换完成；真正的低边采样
+//! 窗口（LSx 同时导通）要在电流环使能 PWM 后判定。
 
 use contracts::motor::config_hw::SOX_AMPS_PER_LSB;
 use contracts::RawSample3;
 use embassy_stm32::pac;
-use embassy_stm32::pac::adc::vals::{Adcaldif, Difsel, Exten, SampleTime};
+use embassy_stm32::pac::adc::vals::{Adcaldif, Difsel, Exten, Jexten, SampleTime};
 use embassy_stm32::pac::gpio::vals::Moder;
 use embassy_stm32::pac::opamp::vals::{Opahsm, Opaintoen, PgaGain, VmSel, VpSel};
 use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, OPAMP1, OPAMP2, OPAMP3, PA3, PA7, PB0};
@@ -41,7 +44,7 @@ pub struct Sample {
     pub raw: RawSample3,
     /// 低边采样窗口是否满足 `SAMPLE_WINDOW_MIN_NS`。
     ///
-    /// T-013 过渡实现只表示转换完成；最终注入组触发后改由硬件窗口判定。
+    /// T-013 只保证注入转换完成；低边窗口判定要在电流环使能 PWM 后接入。
     pub window_ok: bool,
 }
 
@@ -68,7 +71,7 @@ pub struct AdcPins {
 }
 
 impl Adc {
-    /// 配置三路 OPAMP follower 与 ADC 规则组。
+    /// 配置三路 OPAMP follower 与 ADC 注入组。
     ///
     /// 返回 `None` 表示 ADC 校准/使能超时，调用方必须进 fault dump，不得继续。
     pub fn init(pins: AdcPins) -> Option<Self> {
@@ -112,11 +115,10 @@ impl Adc {
     /// 取本拍样本；任一 ADC 超时返回 `None`。
     ///
     /// 三路按 A/B/C 顺序打包：ADC3=SOA、ADC2=SOB、ADC1=SOC。
+    ///
+    /// 三路注入组由 TIM1_TRGO2 同一个更新事件触发；这里只等待并读回，
+    /// 不软件启动转换。
     pub fn take_sample(&mut self) -> Option<Sample> {
-        start(&pac::ADC1);
-        start(&pac::ADC2);
-        start(&pac::ADC3);
-
         let c = wait_result(&pac::ADC1)?;
         let b = wait_result(&pac::ADC2)?;
         let a = wait_result(&pac::ADC3)?;
@@ -181,11 +183,8 @@ fn configure_adc(adc: &pac::adc::Adc, channel: u8) -> bool {
         w.set_exten(Exten::DISABLED);
     });
 
-    // 规则组只排 1 个通道；通道 10..19 的采样时间在 SMPR2（下标 1）。
-    adc.sqr1().modify(|w| {
-        w.set_l(0);
-        w.set_sq(0, channel);
-    });
+    // 注入组只排 1 个通道；通道 10..19 的采样时间在 SMPR2（下标 1）。
+    // 规则组保持禁用；慢通道扫描后续另配，不混进 20 kHz 电流采样。
     let smpr = if channel >= 10 { 1 } else { 0 };
     let smp_index = if channel >= 10 { channel - 10 } else { channel };
     adc.smpr(smpr)
@@ -198,18 +197,37 @@ fn configure_adc(adc: &pac::adc::Adc, channel: u8) -> bool {
     }
     adc.isr().write(|w| w.set_adrdy(true));
 
+    // 注入组：JL=0（1 个转换），JEXTSEL=8（TIM1_TRGO2），JEXTEN=上升沿。
+    // JRQ 只能在 JADSTART=0 时改；此时尚未启动。
+    adc.jsqr().modify(|w| {
+        w.set_jl(0);
+        w.set_jextsel(8);
+        w.set_jexten(Jexten::RISINGEDGE);
+        w.set_jsq1(0, channel);
+    });
+    // RM0440 §21.4.15/§21.4.18：注入硬件触发必须置 JADSTART=1，否则
+    // JEXTEN 的边沿被忽略。这里保持 JQDIS=1（队列关闭），JEXTEN=01
+    // 仍是硬件触发，且 JSQR 不会被队列消费。
+    adc.cfgr().modify(|w| w.set_jqdis(true));
+    adc.cr().modify(|w| w.set_jadstart(true));
+
+    // 清掉 ADC 使能期间可能残留的注入标志。
+    adc.isr().write(|w| {
+        w.set_jeoc(true);
+        w.set_jeos(true);
+        w.set_jqovf(true);
+    });
+
     true
 }
 
-fn start(adc: &pac::adc::Adc) {
-    adc.cr().modify(|w| w.set_adstart(true));
-}
-
 fn wait_result(adc: &pac::adc::Adc) -> Option<u16> {
-    if !wait_until(|| adc.isr().read().eoc(), 4_000) {
+    if !wait_until(|| adc.isr().read().jeos(), 4_000) {
         return None;
     }
-    Some(adc.dr().read().rdata())
+    let value = adc.jdr(0).read().jdata() as u16;
+    adc.isr().write(|w| w.set_jeos(true));
+    Some(value)
 }
 
 fn wait_until(mut done: impl FnMut() -> bool, limit: u32) -> bool {

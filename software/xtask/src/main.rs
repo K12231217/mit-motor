@@ -50,8 +50,7 @@ fn main() -> ExitCode {
         "flash" => cargo(&["run", "--release"]),
         "rtt" => rtt(&rest),
         // 台架主入口：编译 + 烧录 + 从复位开始抓 RTT，同时落一份日志。
-        "hil" if rest.is_empty() => hil(),
-        "hil" => Err(format!("`hil` takes no arguments (got {})", rest.join(" "))),
+        "hil" => hil(&rest),
         "dac" => dac(&rest),
         // 架构不变量（docs/software-architecture.md §9）的唯一实现在 checks.rs。
         "arch" if rest.is_empty() => checks::run(),
@@ -107,8 +106,9 @@ usage: cargo xtask <command> [args]
               against the FLASH length in software/firmware/memory.x
   flash       cargo run --release (probe-rs runner from .cargo/config.toml)
   rtt         probe-rs attach --chip <chip from .cargo/config.toml> [args]
-  hil         build + flash + RTT from reset; log to .scratch/hil/run.log
-              (fixed TP card: docs/instrumentation.md)
+  hil [--boot-freeze]
+              build + flash + RTT from reset; log to .scratch/hil/run.log
+              --boot-freeze holds TP2/PB7 high for 1 s at reset for probe capture
   dac <1|2> <code>
               hold DAC1 channel on the target (e.g. `dac 2 4095` for TP2)
   arch        architecture invariants, pure Rust (docs/software-
@@ -412,7 +412,12 @@ fn dac(args: &[String]) -> Result<(), String> {
 ///
 /// `probe-rs run` 同时完成 flash 和 RTT，避免“先 flash、再 attach，启动日志已丢”的
 /// 常见操作失误。固定测试点只认 `docs/instrumentation.md`，本命令不引入新探针。
-fn hil() -> Result<(), String> {
+fn hil(args: &[String]) -> Result<(), String> {
+    let boot_freeze = match args {
+        [] => false,
+        [flag] if flag == "--boot-freeze" => true,
+        _ => return Err("usage: cargo xtask hil [--boot-freeze]".to_string()),
+    };
     println!("HIL bench card (fixed test points, docs/instrumentation.md):");
     println!("  CH1 PA4/TP1  DAC1_OUT1 residual     0 A = 1.65 V");
     println!("  CH2 PA5/TP2  DAC1_OUT2 freeze       0 V normal / 3.3 V frozen");
@@ -421,7 +426,11 @@ fn hil() -> Result<(), String> {
     println!("  trigger: CH2 rising, single; start 10 ms/div, then 20 us/div for PWM");
     println!();
 
-    cargo(&["build", "--release"])?;
+    if boot_freeze {
+        cargo(&["build", "--release", "--features", "hil-boot-freeze"])?;
+    } else {
+        cargo(&["build", "--release"])?;
+    }
     let chip = chip_name()?;
     let elf = elf_path()?;
     let log_dir = std::env::current_dir()
