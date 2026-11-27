@@ -61,5 +61,5 @@ HIL: PASS 2026-11-27 T-015 20 kHz current task（ADC/rate）
 
 - 硬件过压 break 缺口：补 TIM1_BKIN 还是只做软件 OVP 停机。
 - 500 ns 死区 LA 实测；nSLEEP 1 ms 唤醒是否足够。
-- T-013 的 A/C 相 OPAMP/ADC 交叉映射台架确认。
+- T-013 的 A/C 映射由最新网表 §3.1 固定（SOA→PB0/ADC3、SOB→PA7/ADC2、SOC→PA3/ADC1），不作为 HIL 项。
 - `CalibRecord` 字段集与 A/B 新旧判定（决定 `bsp` flash 接口）。

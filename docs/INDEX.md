@@ -59,4 +59,4 @@
 - **死区**：500 ns 是 HR-302 上限，待 LA 实测后定 DTG。
 - **nSLEEP 唤醒**：`enable` 目前等 1 ms，待 MP6540HA 手册/实测确认。
 - **标定档案**：`CalibRecord` 字段（board_id/版本/零偏/OVP）+ A/B 新旧判定，决定 `bsp` flash 接口。
-- **相序交叉**：T-013 的 ADC/OPAMP 通道映射必须按 §1 的 A/C 交叉写，待台架确认。
+- **相序交叉**：以最新网表 §3.1 为唯一事实：`SOA→PB0/ADC3`、`SOB→PA7/ADC2`、`SOC→PA3/ADC1`；代码按此写，**不列为 HIL 项**。
