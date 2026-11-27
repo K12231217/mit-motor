@@ -247,4 +247,5 @@ current errors=0 isr_cycles=1952 isr_count=20013 ...
 - 已测：TP1=1.2623 V；`cargo xtask dac 2 4095` 保持时 TP2=2.496 V。
 - 已测：`hil --boot-freeze` 的 1 s 高脉冲；结束后约 100 ms，自动触发再产生 76.8 ms 高脉冲（2000 样本 @20 kHz + 1536 后触发）。
 - 已实现并 HIL 通过：注入组/TIM1_TRGO2。RTT `adc0≈2039`、`isr_count=20004/s`、`errors=0`；注入触发要求 `JQDIS=1`、`JADSTART=1`。
-- 未做：`enable` 波形/死区 LA、低边窗口判定。
+- 已实现：低边窗口判据 `MOE + CC1NE/2NE/3NE`；`--enable-zero` 时 `trigger=true`，普通 `hil` 时 `trigger=false`。
+- 未做：门极/死区物理 LA。

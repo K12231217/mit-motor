@@ -53,7 +53,8 @@ HIL: PASS 2026-11-27 T-015 20 kHz current task（ADC/rate）
 - 已测：`hil --boot-freeze` 先给 1 s 高；boot 结束后约 100 ms 又出现 76.8 ms 自动触发高脉冲，二者均约 2.49 V。
 - 已实现并 HIL 通过：ADC1/2/3 注入组 + TIM1_TRGO2 + 三路 JDR1。
 - HIL：`adc0 a/b/c≈2039`、`isr_count=20004/s`、`isr_cycles≈2005`、`errors=0`；注入组必须 `JQDIS=1` 且 `JADSTART=1`（RM0440 §21.4.15/§21.4.18）。
-- **HIL PASS（enable-zero）**：`moe=true`、`aoe=false`、`bke=false`、`nfault=false`、`isr_count=20004/s`、`errors=0`、`adc0≈2039`；门极波形仍 `BLOCKED`，低边窗口未验。
+- **HIL PASS（enable-zero）**：`moe=true`、`aoe=false`、`bke=false`、`nfault=false`、`isr_count=20004/s`、`errors=0`、`adc0≈2048`；
+- **HIL PASS（低边窗口判据）**：`--enable-zero` 时 `DATA`/`trigger=true`，普通 `hil`（MOE=0）时 `recorder trigger=false`；判据由 TIM1 `MOE=1 + CC1NE/2NE/3NE=1` 实时产生。门极/死区物理波形仍 `BLOCKED`。
 - 复位启动：最早期把 PB7 拉高作“已进 init”标记；`Trace` 提前初始化；`Pwm::wake` 的 nFAULT 等待从 10 ms 放宽到 100 ms；时钟校验重试 10×10 ms；wake/ADC/零位/门控失败时 TP2+PB7 常高作故障码。
 - 手动复位“全无输出”已定位：`probe-rs`/GDB 留下的 `DEMCR.VC_CORERESET=1` 把核停在 `Reset`（PC 0x080001d8，DHCSR C_HALT=1）；NRST 仍为 3.3 V，但固件没执行。清除 DEMCR bit0 或断电重上电后恢复；不是芯片卡死。
 

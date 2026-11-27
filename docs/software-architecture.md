@@ -61,7 +61,7 @@ H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一�
 | `lib.joint.service_contracts` | `software/contracts/src/lib.rs` | `lib` | crate 根与 re-export；无状态 |
 | `bsp.motor.service_clock` | `software/bsp/src/motor/service_clock.rs` | `init` | HSE 16M/PLL 170M 配置与读回；不匹配进 fault |
 | `bsp.motor.bus_pwm` | `software/bsp/src/motor/bus_pwm.rs` | `current @8` | TIM1 20 kHz/500 ns；无 BKIN（BKE=0）；enable 检查 nFAULT |
-| `bsp.motor.bus_adc` | `software/bsp/src/motor/bus_adc.rs` | `current @8` | ADC1/2/3 注入组 + TIM1_TRGO2；低边窗口判定待接入 |
+| `bsp.motor.bus_adc` | `software/bsp/src/motor/bus_adc.rs` | `current @8` | ADC1/2/3 注入组 + TIM1_TRGO2；低边窗口由 MOE+CCxNE 实时判定 |
 | `bsp.motor.bus_encoder` | `software/bsp/src/motor/bus_encoder.rs` | `current @8` | SPI1/主编码器唯一所有者；只搬字节 |
 | `bsp.motor.service_dwt` | `software/bsp/src/motor/service_dwt.rs` | `current @8` | DWT CYCCNT；先开 DCB.TRCENA，再使能计数器 |
 | `bsp.motor.service_timebase` | `software/bsp/src/motor/service_timebase.rs` | `init` | TIM5 1 MHz，defmt 时间戳；32 位回绕 |

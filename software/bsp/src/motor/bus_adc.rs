@@ -8,8 +8,9 @@
 //! TIM1_TRGO2 的 JEXTSEL 值 0b01000：RM0440 Rev 9 表 167（ADC1/2）与表 169
 //! （ADC3/4/5）均为 `tim1_trgo2`。三路转换由硬件触发，不再软件写 ADSTART。
 //!
-//! `window_ok` 仍是**过渡判据**：本模块只保证注入转换完成；真正的低边采样
-//! 窗口（LSx 同时导通）要在电流环使能 PWM 后判定。
+//! `window_ok` 由 TIM1 的实时输出状态判定：MOE=1、AOE=0，且三路低边
+//! （CC1NE/CC2NE/CC3NE）都使能。中心对齐 + [`D_MAX`](contracts::motor::config_hw::D_MAX)
+//! 保证更新事件落在低边共导窗口内。
 
 use contracts::motor::config_hw::SOX_AMPS_PER_LSB;
 use contracts::RawSample3;
@@ -42,9 +43,7 @@ pub struct Adc {
 pub struct Sample {
     /// 三路原始码、拍号与采样时刻。
     pub raw: RawSample3,
-    /// 低边采样窗口是否满足 `SAMPLE_WINDOW_MIN_NS`。
-    ///
-    /// T-013 只保证注入转换完成；低边窗口判定要在电流环使能 PWM 后接入。
+    /// 本拍是否落在低边共导窗口：MOE=1、AOE=0、三路 CCxNE=1。
     pub window_ok: bool,
 }
 
@@ -119,6 +118,7 @@ impl Adc {
     /// 三路注入组由 TIM1_TRGO2 同一个更新事件触发；这里只等待并读回，
     /// 不软件启动转换。
     pub fn take_sample(&mut self) -> Option<Sample> {
+        let window_ok = low_side_window();
         let c = wait_result(&pac::ADC1)?;
         let b = wait_result(&pac::ADC2)?;
         let a = wait_result(&pac::ADC3)?;
@@ -130,7 +130,7 @@ impl Adc {
                 t_us: now_us(),
                 code: [a, b, c],
             },
-            window_ok: true,
+            window_ok,
         })
     }
 }
@@ -219,6 +219,17 @@ fn configure_adc(adc: &pac::adc::Adc, channel: u8) -> bool {
     });
 
     true
+}
+
+/// TIM1 当前是否处于低边共导窗口。
+///
+/// `D_MAX` 保证更新事件（TRGO2）距低边关断至少 5 µs；这里只判输出是否真的
+/// 使能，防止在 `MOE=0` 或通道关闭时把样本送进 GainGate。
+fn low_side_window() -> bool {
+    let tim = pac::TIM1;
+    let bdtr = tim.bdtr().read();
+    let ccer = tim.ccer().read();
+    bdtr.moe() && !bdtr.aoe() && ccer.ccne(0) && ccer.ccne(1) && ccer.ccne(2)
 }
 
 fn wait_result(adc: &pac::adc::Adc) -> Option<u16> {
