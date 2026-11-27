@@ -8,8 +8,10 @@
 # 永远用 firmware/.cargo/config.toml 的目标与 runner），xtask 永远是 host 工具。
 # 把任何一个并进来都会改变 `cargo xtask rel/size/flash` 的行为。
 #
-# `1_bsp` / `2_system` / `4_app` 目前不建空壳：无板、无代码，空 crate 就是死代码。
+# `1_bsp` 是独立 thumb crate（T-011 脚手架），由 `firmware/` 以 path 依赖编译；
+# 它不能并入本 workspace，否则 `cargo test --workspace` 会尝试在 host 上编译
+# `embassy-stm32`。`2_system` / `4_app` 仍未建：无代码，空 crate 就是死代码。
 [workspace]
 resolver = "2"
 members = ["0_contracts", "3_user"]
-exclude = ["firmware", "xtask"]
+exclude = ["firmware", "xtask", "1_bsp"]

@@ -31,17 +31,19 @@
 
 - 落点：`cargo xtask arch` 的 I1（`cargo tree -p user` 里不得出现 `bsp`/`embassy-*`/`rtic`）、
   I2（`0_contracts` 与 `3_user` 零 `unsafe`）。
-- 限制：`1_bsp`/`2_system`/`4_app` 未建，扫描根只有两个 crate；三个 crate 落地时必须把
-  `checks.rs` 的 `SCAN_ROOTS` 与 `docs/software-architecture.md` §9-8 一并扩展，否则不得报 PASS。
+- 限制：`1_bsp` 已建（T-011 脚手架），I2 仍只扫零 `unsafe` 的 `0_contracts`/`3_user`
+  （`1_bsp` 是 `unsafe` 白名单，不进 I2）；`hygiene` 的扫描根已含 `1_bsp/src`。
+  `2_system`/`4_app` 落地时必须把 `checks.rs` 的 `SCAN_ROOTS` 与
+  `docs/software-architecture.md` §9-8 一并扩展，否则不得报 PASS。
 
 ### H2 静默吞错与无主 TODO
 
 - 编译器层：两个 crate 根 `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]`；
   `cargo xtask clippy` 现在跑 firmware 与根 workspace 两遍，测试目标也在内。
-- 标记层：`hygiene` H2 扫 `0_contracts/src`、`3_user/src`、`firmware/src`，规则：
+- 标记层：`hygiene` H2 扫 `0_contracts/src`、`1_bsp/src`、`3_user/src`、`firmware/src`，规则：
   - `TODO` / `FIXME` 只能是 `TODO(owner, trigger): 说明`，缺 owner、缺触发条件或格式不符即 FAIL；
   - `XXX` / `HACK` 无条件 FAIL——它们本身就是「先这样，以后再说」。
-- 限制：行级扫描，字符串字面量里出现 `//` 会误判（三个源码树当前无此写法）；`xtask` 自身不扫。
+- 限制：行级扫描，字符串字面量里出现 `//` 会误判（四个源码树当前无此写法）；`xtask` 自身不扫。
 
 ### H3 分级门禁
 
@@ -131,7 +133,7 @@
 ## 5. 维护与失效条件
 
 - 本文只写机制与命令，不复写阈值、引脚、容量（PRE-07/PRE-10）。
-- H1 的扫描根随 `1_bsp`/`2_system`/`4_app` 落地而扩展；未扩展前 `arch` 不得宣称覆盖四层。
+- H1 的扫描根随 `2_system`/`4_app` 落地而扩展；`1_bsp` 只进 `hygiene`，不进 I2；未扩展前 `arch` 不得宣称覆盖四层。
 - H3 的 Tier 路径表在出现第一个「硬件耦合但不在四个前缀下」的目录（例如新的 `5_*`）时立即失效，
   必须同步 `xtask/src/tier.rs` 的 `TIER_B_PREFIXES`。
 - H4 依赖 `docs/software-architecture.md` §2 的 crate 分块格式；文件树改成表格或列表时，

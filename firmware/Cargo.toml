@@ -56,6 +56,8 @@ features = ["cortex-m-systick"]
 version = "1.6.0"
 
 [dependencies]
+# T-011 脚手架：1_bsp 独立 crate；main.rs 在 T-012 迁移到它。
+bsp = { path = "../1_bsp" }
 embassy-stm32 = { version = "0.1.0", features = [ "defmt", "time-driver-any", "stm32g474rb", "unstable-pac", "exti"]  }
 
 defmt = "0.3"

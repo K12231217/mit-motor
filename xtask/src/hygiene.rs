@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-const SCAN_ROOTS: [&str; 3] = ["0_contracts/src", "3_user/src", "firmware/src"];
+const SCAN_ROOTS: [&str; 4] = ["0_contracts/src", "1_bsp/src", "3_user/src", "firmware/src"];
 const ARCH_DOC: &str = "docs/software-architecture.md";
 /// 必须带 owner 与触发条件的标记。
 const OWNED_MARKERS: [&str; 2] = ["TODO", "FIXME"];

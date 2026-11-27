@@ -41,7 +41,7 @@ members = ["0_contracts", "1_bsp", "2_system", "3_user", "4_app"]
   src/limits/budget.rs  #   系统预算（环频率、帧率、队列容量、看门狗）
   src/limits/mod.rs     #   limits 汇总 re-export（数值仍只在 hw/budget 定义一次）
 
-1_bsp/                  # 唯一 unsafe 层（包名 bsp）
+1_bsp/                  # 唯一 unsafe 层（包名 bsp）[T-011 脚手架]
   src/lib.rs            #   Board 类型、init 构造后 move 移交、所有权表
   src/clock.rs          #   RCC 读回校验（embassy 配，bsp 验）
   src/gpio.rs           #   PWM/CS/STROBE/LED 的静态配置
