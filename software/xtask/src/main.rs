@@ -106,9 +106,10 @@ usage: cargo xtask <command> [args]
               against the FLASH length in software/firmware/memory.x
   flash       cargo run --release (probe-rs runner from .cargo/config.toml)
   rtt         probe-rs attach --chip <chip from .cargo/config.toml> [args]
-  hil [--boot-freeze]
+  hil [--boot-freeze] [--enable-zero]
               build + flash + RTT from reset; log to .scratch/hil/run.log
               --boot-freeze holds TP2/PB7 high for 1 s at reset for probe capture
+              --enable-zero sets MOE with zero vector (no motor; current-limited)
   dac <1|2> <code>
               hold DAC1 channel on the target (e.g. `dac 2 4095` for TP2)
   arch        architecture invariants, pure Rust (docs/software-
@@ -413,11 +414,15 @@ fn dac(args: &[String]) -> Result<(), String> {
 /// `probe-rs run` 同时完成 flash 和 RTT，避免“先 flash、再 attach，启动日志已丢”的
 /// 常见操作失误。固定测试点只认 `docs/instrumentation.md`，本命令不引入新探针。
 fn hil(args: &[String]) -> Result<(), String> {
-    let boot_freeze = match args {
-        [] => false,
-        [flag] if flag == "--boot-freeze" => true,
-        _ => return Err("usage: cargo xtask hil [--boot-freeze]".to_string()),
-    };
+    let mut boot_freeze = false;
+    let mut enable_zero = false;
+    for arg in args {
+        match arg.as_str() {
+            "--boot-freeze" => boot_freeze = true,
+            "--enable-zero" => enable_zero = true,
+            _ => return Err("usage: cargo xtask hil [--boot-freeze] [--enable-zero]".to_string()),
+        }
+    }
     println!("HIL bench card (fixed test points, docs/instrumentation.md):");
     println!("  CH1 PA4/TP1  DAC1_OUT1 residual     0 A = 1.65 V");
     println!("  CH2 PA5/TP2  DAC1_OUT2 freeze       0 V normal / 3.3 V frozen");
@@ -426,10 +431,17 @@ fn hil(args: &[String]) -> Result<(), String> {
     println!("  trigger: CH2 rising, single; start 10 ms/div, then 20 us/div for PWM");
     println!();
 
+    let mut features = Vec::new();
     if boot_freeze {
-        cargo(&["build", "--release", "--features", "hil-boot-freeze"])?;
-    } else {
+        features.push("hil-boot-freeze");
+    }
+    if enable_zero {
+        features.push("hil-enable-zero");
+    }
+    if features.is_empty() {
         cargo(&["build", "--release"])?;
+    } else {
+        cargo(&["build", "--release", "--features", &features.join(",")])?;
     }
     let chip = chip_name()?;
     let elf = elf_path()?;

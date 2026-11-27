@@ -397,7 +397,7 @@ RTT 已见 `dwt=ok cycles=75`、`trace=freeze dac1=2048 dac2=4095`、`DATA,...`�
 - 已实现并 HIL 通过：ADC1/2/3 注入组、TIM1_TRGO2 更新触发、三路 JDR1 读取。
 - HIL：`adc0 a/b/c≈2039`、`isr_count=20004/s`、`isr_cycles≈2005`、`errors=0`；`JQDIS=1` + `JADSTART=1` 才能接收注入边沿。
 - 复位故障码：最早期 PB7 拉高标记已进 init；Trace 先于 Pwm/ADC 初始化；`Pwm::wake` 的 nFAULT 等待放宽到 100 ms；时钟校验重试 10×10 ms；wake/ADC/零位/门控失败时 TP2+PB7 常高。20 次 SWD 复位均正常，手动复位“全无输出”未复现。
-- 未做：`enable` 波形/死区 LA；低边窗口判定。
+- 下一步：`cargo xtask hil --enable-zero`（零矢量、不接电机、限流）验证 MOE/20 kHz；门极波形/死区 LA 仍 `BLOCKED`，低边窗口未验。
 
 ## 5. 测试点与注入网络
 

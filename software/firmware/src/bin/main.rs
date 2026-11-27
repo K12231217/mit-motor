@@ -153,6 +153,18 @@ mod app {
             }
         }
 
+        #[cfg(feature = "hil-enable-zero")]
+        {
+            if pwm.enable().is_err() {
+                trace.freeze();
+                defmt::error!("hil=enable-zero fail: nFAULT/AOE; TP2/PB7 fault");
+                loop {
+                    core::hint::spin_loop();
+                }
+            }
+            defmt::info!("hil=enable-zero moe=1 (zero vector, no motor)");
+        }
+
         #[cfg(feature = "hil-boot-freeze")]
         {
             trace.freeze();

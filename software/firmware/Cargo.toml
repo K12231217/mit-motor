@@ -40,6 +40,8 @@
 default = []
 # HIL-only: hold DAC2/TP2 and PB7 high for 1 s at reset for probe capture.
 hil-boot-freeze = []
+# HIL-only: enable TIM1 with zero modulation (no motor, current-limited).
+hil-enable-zero = []
 
 [package]
 edition = "2021"
