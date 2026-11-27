@@ -256,7 +256,7 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 | HR-802 | FMAC | 标定估计器的点积累加（最小二乘）用 FMAC，不进 20 kHz 环 | 10 ms 标定任务 CPU 占用 < 20 % |
 | HR-803 | DAC 模拟遥测 | **PA4（DAC1_OUT1）** 输出残差 r_k（0 A=2048，±0.5 A=0/4095）；**PA5（DAC1_OUT2）** 数字指示：正常 0，校准冻结 4095。1 µs 内可更新，TP1/TP2 | 示波器 CH2 上升沿单次触发；DAC 码与 RTT 回读一致 |
 | HR-804 | DAC → J_SYNC 自检 | PA4 经跳线驱动 J_SYNC 共点：三路 ADC 看同一 DAC 斜坡，**不需要外部信号源**即可测同步、线性与偏斜 | 三路读同一斜坡偏差 ≤ 2 LSB；扫相位得偏斜 |
-| HR-805 | 注入组 / 规则组分工 | 三路电流走 **ADC1/2/3 注入组**，由 **TIM1_TRGO2 同步触发**；单个 TIM1_UP ISR 内等待三路 JEOS，一次性读三路 JDR1 并打同一 `RawSample3.tick`。VBUS/NTC/VREFINT 走**规则组 + DMA 慢扫**。T-013 已改为注入组/TIM1_TRGO2；低边窗口判定仍待电流环使能后接入 | 20 kHz 下电流点不丢；三路 `tick` 相同；慢通道 1 ms 更新 |
+| HR-805 | 注入组 / 规则组分工 | 三路电流走 **ADC1/2/3 注入组**，由 **TIM1_TRGO2 同步触发**；单个 TIM1_UP ISR 内等待三路 JEOS，一次性读三路 JDR1 并打同一 `RawSample3.tick`。VBUS/NTC/VREFINT 走**规则组 + DMA 慢扫**。T-013 已改为注入组/TIM1_TRGO2；低边窗口由 MOE+CCNE 判定，按互补 PWM 默认三相同时 | 20 kHz 下电流点不丢；三路 `tick` 相同；慢通道 1 ms 更新 |
 | HR-806 | ADC 模拟看门狗 | AWD1/2/3 设过流与采样越限阈值，超限直接进硬件中断（不依赖软件残差）| 注入超限电流，中断命中且动作在下一周期内 |
 | HR-807 | 硬件过采样 | 台架模式 4–16× 过采样（与 DMM 对齐）；控制环单次采样；模式可切 | 同一电流下读数稳定度 < 1 LSB |
 | HR-808 | 内部比较器 + DAC 阈值 | COMP2_INP 与 VBUS_ADC **同脚 PA3**，不需额外分压；DAC 作可调阈值 ⇒ 过压/欠压实验直接改固件数值；COMP2_OUT 引到空闲脚 **PA2** 供 LA 抓取（`PA2` 同时是 `COMP2_INM`，本设计用内部 DAC 作阈值，不占用该输入）。外部 TLV7021 保留为不依赖固件的硬保护 | 改 DAC 值即改翻转点；COMP→TIM1_BKIN 内部互连按 RM0440 §21 核对，不可用则仅作可观测 |
@@ -365,7 +365,7 @@ RTT：`clock=ok`、`pwm=ok arr=4250 dtg=85 moe=false aoe=false bke=false`。
 > 手册对照（2026-11-27）：RM0440 §29.3.5 中心对齐模式下 RCR=1 使 UEV 每两个半周期
 > 一次 → 20 kHz；BDTR DTG=0x55=85，`t_DTS=1/170 MHz`，在 `DTG[7:5]=0xx` 区间
 > `DT=85×5.882 ns=500 ns`。`isr_count=20013/s` 与 20 kHz 吻合。
-> U9.6/U9.3 探头不可达，因此 `enable` 门极波形仍为 `BLOCKED`，不伪造 PASS。
+> 不测 U9 门极波形；低边三相同时按互补 PWM 默认。台上只用 TP1/TP2/PB6/PB7。
 
 ### 4.2 T-013：电流采样 / DAC / 片内 OPAMP
 
@@ -398,7 +398,7 @@ RTT 已见 `dwt=ok cycles=75`、`trace=freeze dac1=2048 dac2=4095`、`DATA,...`�
 - HIL：`adc0 a/b/c≈2039`、`isr_count=20004/s`、`isr_cycles≈2005`、`errors=0`；`JQDIS=1` + `JADSTART=1` 才能接收注入边沿。
 - 复位故障码：最早期 PB7 拉高标记已进 init；Trace 先于 Pwm/ADC 初始化；`Pwm::wake` 的 nFAULT 等待放宽到 100 ms；时钟校验重试 10×10 ms；wake/ADC/零位/门控失败时 TP2+PB7 常高。20 次 SWD 复位均正常，手动复位“全无输出”未复现。
 - **HIL PASS（enable-zero）**：`moe=true`、`nfault=false`、`isr_count=20004/s`、`errors=0`、`adc0≈2048`。
-- **HIL PASS（低边窗口判据）**：`--enable-zero` 时 `trigger=true` 并有 `DATA`；普通 `hil`（MOE=0）时 `trigger=false`。判据来自 TIM1 `MOE + CC1NE/2NE/3NE`；门极/死区物理波形仍 `BLOCKED`。
+- **HIL PASS（低边窗口判据）**：`--enable-zero` 时 `trigger=true` 并有 `DATA`；普通 `hil`（MOE=0）时 `trigger=false`。判据来自 TIM1 `MOE + CC1NE/2NE/3NE`；低边同时按互补 PWM 默认，不测门极。
 
 ## 5. 测试点与注入网络
 

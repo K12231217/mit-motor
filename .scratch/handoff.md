@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | T-015 | B | 20 kHz current task：TIM1_UP → OPAMP/ADC → GainGate 残差 → DAC/TP_SYNC/录波 | T-014 HIL 后 | **HIL PASS（ADC/rate/DAC/freeze）**：`adc0≈2038`、`r_lsb≈-1`、`isr_count=20013/s`；TP1=1.2623 V、TP2 静态=2.496 V；实测 boot-freeze 1 s，随后 100 ms 自动触发 76.8 ms；`enable` 波形未测 |
 | T-014 | B | trace 基础设施：PB6/PB7 TP_SYNC、DAC1_OUT1 残差/OUT2 冻结、TIM5 1 MHz、DWT、512/1536 预/后触发环与 `stride` | T-012 HIL 后 | **HIL: PASS（RTT/寄存器）**：`recorder pre=512 post=1536 len=2048`；stride 1/10 均锁存；物理 DAC/TP_SYNC 未测 |
-| T-012 | B | `bsp` clock + pwm：HSE 16M/PLL 170M 读回；TIM1 20 kHz/500 ns；按 2026-11-27 网表 nSLEEP PC7、nFAULT PC8、无 BKIN | `4f67b32`（T-011 脚手架） | **HIL: PASS（safe-off）**：RTT `clock=ok`、`pwm=ok arr=4250 dtg=85 moe/aoe/bke=false`；定时器/死区已按 RM0440 对照（RCR=1、DTG=85→500 ns），`enable` 门极波形因 U9 探头不可达 `BLOCKED`；硬件过压 break 缺口待补 |
+| T-012 | B | `bsp` clock + pwm：HSE 16M/PLL 170M 读回；TIM1 20 kHz/500 ns；按 2026-11-27 网表 nSLEEP PC7、nFAULT PC8、无 BKIN | `4f67b32`（T-011 脚手架） | **HIL: PASS（safe-off）**：RTT `clock=ok`、`pwm=ok arr=4250 dtg=85 moe/aoe/bke=false`；定时器/死区已按 RM0440 对照（RCR=1、DTG=85→500 ns），`enable` 门极波形不测；低边窗口按互补 PWM 默认三相同时；仅使用 TP1/TP2/PB6/PB7；硬件过压 break 缺口待补 |
 
 ## 2. 当前工作区
 
@@ -54,7 +54,7 @@ HIL: PASS 2026-11-27 T-015 20 kHz current task（ADC/rate）
 - 已实现并 HIL 通过：ADC1/2/3 注入组 + TIM1_TRGO2 + 三路 JDR1。
 - HIL：`adc0 a/b/c≈2039`、`isr_count=20004/s`、`isr_cycles≈2005`、`errors=0`；注入组必须 `JQDIS=1` 且 `JADSTART=1`（RM0440 §21.4.15/§21.4.18）。
 - **HIL PASS（enable-zero）**：`moe=true`、`aoe=false`、`bke=false`、`nfault=false`、`isr_count=20004/s`、`errors=0`、`adc0≈2048`；
-- **HIL PASS（低边窗口判据）**：`--enable-zero` 时 `DATA`/`trigger=true`，普通 `hil`（MOE=0）时 `recorder trigger=false`；判据由 TIM1 `MOE=1 + CC1NE/2NE/3NE=1` 实时产生。门极/死区物理波形仍 `BLOCKED`。
+- **HIL PASS（低边窗口判据）**：`--enable-zero` 时 `DATA`/`trigger=true`，普通 `hil`（MOE=0）时 `recorder trigger=false`；判据由 TIM1 `MOE=1 + CC1NE/2NE/3NE=1` 实时产生。低边同时导通按互补 PWM 默认，不测门极波形；只用 TP1/TP2/PB6/PB7。
 - 复位启动：最早期把 PB7 拉高作“已进 init”标记；`Trace` 提前初始化；`Pwm::wake` 的 nFAULT 等待从 10 ms 放宽到 100 ms；时钟校验重试 10×10 ms；wake/ADC/零位/门控失败时 TP2+PB7 常高作故障码。
 - 手动复位“全无输出”已定位：`probe-rs`/GDB 留下的 `DEMCR.VC_CORERESET=1` 把核停在 `Reset`（PC 0x080001d8，DHCSR C_HALT=1）；NRST 仍为 3.3 V，但固件没执行。清除 DEMCR bit0 或断电重上电后恢复；不是芯片卡死。
 
