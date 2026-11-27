@@ -193,6 +193,11 @@ cargo xtask rtt
 若复位后 **PB7 常高、TP1 仍为 0 V**，停在 embassy 时钟配置或 100 ms 时钟校验；TP1 有 1.25 V、TP2/PB7 常高、PB6 没有 20 kHz，则是 wake/ADC/零位/门控故障：
 `Pwm::wake`（nFAULT 100 ms 仍低）、ADC 校准/零位或门控零位失败都会走这条可见故障码。
 RTT 会给出对应的 `driver=wake fail` / `adc=bad` / `adc0=bad` / `gate=bad`。
+
+**调试器复位捕获**：如果 TP1=0、PB7=0 且 NRST 已经是 3.3 V，先查 `DEMCR.VC_CORERESET`
+（`0xE000EDFC` bit0）和 `DHCSR.C_HALT`（`0xE000EDF0` bit1）。`probe-rs`/GDB 退出后可能留下
+reset vector catch，此时手动按 NRST 能把核停在 `Reset`（PC 0x080001d8），看起来像“全无输出”，
+但不是固件卡死。清除 bit0 或断电重上电后再按复位；调试会话重新 attach 后可能再次置位。
 TP2 的冻结脉冲只有约 **76.8 ms**，万用表/自动触发容易错过。需要静态测 DAC 时，直接按住通道：
 
 ```sh
