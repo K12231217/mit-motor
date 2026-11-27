@@ -63,6 +63,8 @@ pub struct PwmState {
     pub bke: bool,
     /// `nFAULT` 是否拉低。
     pub nfault: bool,
+    /// `nSLEEP` 是否拉高。
+    pub n_sleep: bool,
 }
 
 /// TIM1 与六路栅极输入的所有者。
@@ -108,7 +110,7 @@ impl Pwm {
         });
         r.psc().write(|w| w.set_psc(0));
         r.arr().write(|w| w.set_arr(PWM_ARR));
-        r.rcr().write(|w| w.set_rep(0));
+        r.rcr().write(|w| w.set_rep(1));
 
         r.ccmr_output(0).modify(|w| {
             w.set_ocm(0, Ocm::PWMMODE1);
@@ -146,6 +148,9 @@ impl Pwm {
             w.set_ossr(Ossr::IDLELEVEL);
         });
         r.egr().write(|w| w.set_ug(true));
+        // 20 kHz 电流环由 TIM1 更新事件驱动；清掉 UG 产生的 pending。
+        r.sr().modify(|w| w.set_uif(false));
+        r.dier().modify(|w| w.set_uie(true));
         r.cr1().modify(|w| w.set_cen(true));
 
         Self {
@@ -172,6 +177,23 @@ impl Pwm {
                 r.ccr(2).write(|w| w.set_ccr(ccr_from_modulation(c)));
             }
         }
+    }
+
+    /// 只唤醒驱动（nSLEEP 高），保持 MOE=0、六路关闭；用于电流零位/采样链自检。
+    ///
+    /// # Errors
+    ///
+    /// 唤醒后 `nFAULT` 仍为低：立刻把 `nSLEEP` 拉回低并返回错误，不继续采样。
+    pub fn wake(&mut self) -> Result<(), PwmFault> {
+        self.n_sleep.set_high();
+        // nSLEEP 的 1 ms 是 DS 的最小值，实测 nFAULT 会晚于 1 ms 才释放；
+        // 最多等 10 ms，仍低才判故障，避免把正常唤醒当成 nFAULT。
+        cortex_m::asm::delay(SYS_CLK_HZ / 100);
+        if self.n_fault.is_low() {
+            self.n_sleep.set_low();
+            return Err(PwmFault::NfaultLow);
+        }
+        Ok(())
     }
 
     /// 六路全低，三相高阻。
@@ -236,6 +258,7 @@ impl Pwm {
             aoe: bdtr.aoe(),
             bke: bdtr.bke(),
             nfault: self.n_fault.is_low(),
+            n_sleep: self.n_sleep.is_set_high(),
         }
     }
 }

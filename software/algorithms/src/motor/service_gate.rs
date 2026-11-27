@@ -105,6 +105,10 @@ pub struct GainGate {
     // 最近一次一致性 χ² 统计量（两层取最大），以及是否真的算过。
     chi2: f32,
     chi2_ok: bool,
+    // 最近一拍的模型残差，单位 LSB；仅供遥测/DAC，不参与闸门判定。
+    last_residual_lsb: f32,
+    // 最近一次 `step` 是否真的算出了残差。
+    last_sample_valid: bool,
 }
 
 impl GainGate {
@@ -131,6 +135,8 @@ impl GainGate {
             group_d: 0.0,
             chi2: 0.0,
             chi2_ok: false,
+            last_residual_lsb: 0.0,
+            last_sample_valid: false,
         }
     }
 
@@ -142,6 +148,17 @@ impl GainGate {
     /// 冻结参数集（只读）。
     pub const fn params(&self) -> GateParams {
         self.params
+    }
+
+    /// 最近一拍的模型残差，单位 LSB；没有有效样本时返回 `None`。
+    ///
+    /// 这是 `GainGate` 内部同一残差的只读副本，供 DAC/录波使用，不改变闸门判定。
+    pub fn last_residual_lsb(&self) -> Option<f32> {
+        if self.last_sample_valid {
+            Some(self.last_residual_lsb)
+        } else {
+            None
+        }
     }
 
     /// 最近一次完整组窗的遥测快照。
@@ -204,9 +221,11 @@ impl GainGate {
     pub fn step(&mut self, raw: RawSample3, valid: bool) -> Option<(f32, f32)> {
         if !self.zero_valid {
             self.trust = Trust::UntrustedExcitation;
+            self.last_sample_valid = false;
             return None;
         }
         if !valid {
+            self.last_sample_valid = false;
             return None;
         }
 
@@ -214,8 +233,10 @@ impl GainGate {
         let [za, zb, zc] = self.zero_lsb;
         let s_lsb = [f32::from(ca) - za, f32::from(cb) - zb, f32::from(cc) - zc];
 
-        self.group
-            .push(s_lsb, self.active_theta, self.params.group_samples);
+        self.last_residual_lsb =
+            self.group
+                .push(s_lsb, self.active_theta, self.params.group_samples);
+        self.last_sample_valid = true;
 
         // 组内突变检测只在"已有生效增益"后才有意义；σ_res² 取主累加器的残差方差。
         if self.have_active {
@@ -424,5 +445,7 @@ impl GainGate {
         self.group_d = 0.0;
         self.chi2 = 0.0;
         self.chi2_ok = false;
+        self.last_residual_lsb = 0.0;
+        self.last_sample_valid = false;
     }
 }

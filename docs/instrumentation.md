@@ -10,8 +10,8 @@
 |---|---|---|---|
 | `TP_SYNC_LOOP` | PB6 | 推挽 3.3 V | 20 kHz 控制 ISR 进入拉高、退出拉低；示波器/LA 的周期起点 |
 | `TP_SYNC_FREEZE` | PB7 | 推挽 3.3 V | 校准冻结期间高；与 DAC1_OUT2 同相，供 LA 抓冻结窗口 |
-| `DAC1_OUT1` / TP1 | PA4 | 0…3.3 V | 残差 `r_k`；0 A 固定 2048（约 1.65 V） |
-| `DAC1_OUT2` / TP2 | PA5 | 0 / 3.3 V | 正常 0；冻结瞬间 4095，示波器 CH2 上升沿单次触发 |
+| `DAC1_OUT1` / TP1 | PA4 | 0…2.49 V | 残差 `r_k`；0 A 固定 2048（约 1.25 V） |
+| `DAC1_OUT2` / TP2 | PA5 | 0 / 2.49 V | 正常 0；冻结瞬间 4095，示波器 CH2 上升沿单次触发 |
 
 PB6/PB7 在网表上仍叫 `USART3_TX/RX`，但**本季不启用 USART3**；不要再把这两个脚配成 UART AF。
 调试日志只走 RTT（SWD 的 SWO 也不可用，PB3 是 SPI1_SCK）。
@@ -122,7 +122,7 @@ DATA,k,ia_raw,ib_raw,ic_raw,r_lsb,flags
 - `push` 无锁、无分配、无 `defmt`；未触发时覆盖最旧，触发后写满 1536 帧锁存。
 - 标定任务调用 `TRACE.trigger()`；只有第一次生效。
 - 导出任务先看 `summary().locked`，再 `TRACE.dump(limit)`；`limit=usize::MAX` 导出完整窗口。
-- 导出完成后 `TRACE.arm()` 才能开始下一轮；未锁存时 `arm` 返回 false，避免与写者竞争。
+- 锁存后保持停止；重新布防必须由已停止的写者/写者自己执行，当前不在 20 kHz 写者运行时自动 rearm。
 - HIL 自检帧 flags=0x81；真实数据应为 0x00/0x01（bit0=`FROZEN`）。
 
 ## 5. 所有权与热路径
@@ -155,4 +155,76 @@ DATA,k,ia_raw,ib_raw,ic_raw,r_lsb,flags
 - 20 kHz `enable` 后的 HS/LS 互补与 500 ns 死区。
 - 真实 20 kHz 写者/真实冻结窗口；当前只有自检。
 
-下一步：接示波器 CH1=PA4、CH2=PA5、CH3=PB6、CH4=PB7，CH2 上升沿单次；先跑本探针自检，再接 20 kHz 任务。
+## 7. 一键台架入口
+
+固定测试点不新增探针，统一用：
+
+```sh
+cargo xtask hil
+```
+
+它做三件事：
+
+1. `cargo build --release`
+2. `probe-rs run` 烧录并从复位开始抓 RTT（不会漏掉启动日志）
+3. 同时把解码后的日志写入 `.scratch/hil/run.log`
+
+示波器固定接法：
+
+| 通道 | 测试点 | 信号 |
+|---|---|---|
+| CH1 | PA4 / TP1 | DAC1_OUT1 残差（0 A ≈ 1.25 V） |
+| CH2 | PA5 / TP2 | DAC1_OUT2 冻结指示（0 / 2.49 V） |
+| CH3 | PB6 | TP_SYNC_LOOP（20 kHz ISR 包络） |
+| CH4 | PB7 | TP_SYNC_FREEZE（冻结窗口） |
+
+触发：CH2 上升沿单次；先 10 ms/div 看冻结窗口，再切 20 µs/div 看 20 kHz 循环。
+
+只看当前运行、不重新烧录：
+
+```sh
+cargo xtask rtt
+```
+
+TP2 的冻结脉冲只有约 **76.8 ms**，万用表/自动触发容易错过。需要静态测 DAC 时，直接按住通道：
+
+```sh
+cargo xtask dac 2 4095   # TP2 常高 ≈ 2.49 V
+cargo xtask dac 2 0      # 恢复
+cargo xtask dac 1 2048   # TP1 0 A ≈ 1.25 V
+```
+
+`dac` 直接写 DAC1 `DHR12R1/R2`，不重新编译、不复位，适合先验证 TP1/TP2 的物理通路。
+
+日志转 CSV（PowerShell）：
+
+```powershell
+Select-String '^DATA,' .scratch/hil/run.log |
+  ForEach-Object { $_.Line } |
+  Set-Content .scratch/hil/data.csv
+```
+
+
+## 7. 20 kHz current task（T-015）：HIL PASS
+
+已实现并跑通：
+
+- TIM1 更新中断 `TIM1_UP_TIM16` @20 kHz；每拍 `TP_SYNC_LOOP` 高→ADC→残差→DAC→环→低。
+- OPAMP1/2/3 follower + ADC1_IN13/ADC2_IN16/ADC3_IN13；`GainGate` 的真实 `last_residual_lsb` 送 DAC1_OUT1。
+- 2000 个有效样本后自动 `trigger`/DAC1_OUT2 高；1536 拍后解冻；低优先级 monitor 在 1 s 导出 8 帧。
+- 实测：`current errors=0 isr_cycles=1952 isr_count=20013`（约 11.5 µs @170 MHz，20.013 kHz），`recorder pre=512 post=1536 len=2048`。
+
+**结果**：
+
+```text
+adc0 n=32 a=2037.6562 b=2038.3125 c=2038.75
+DATA,1521,2037,2039,2039,-1,0
+current errors=0 isr_cycles=1952 isr_count=20013 ...
+```
+
+- ADC 零位 **2038**，残差 **-1 LSB**；`isr_count=20013/s` = **20.013 kHz**（`RCR=1`）。
+- 根因：PAC `adc_v4` 的 `RES` 编码与 G474 不一致，`Res::TWELVEBIT` 实际写成 10 bit；
+  raw 509 是 1.247 V 的 10-bit 码。按 G474 `CFGR[4:3]=00` 后恢复 12 bit。
+- `Pwm::wake()` 的 nSLEEP 等待从 1 ms 放宽到 10 ms，`nFAULT` 不再偶发低。
+- 已测：TP1=1.2623 V；`cargo xtask dac 2 4095` 保持时 TP2=2.496 V。
+- 未做：真实 76.8 ms 冻结脉冲的单次捕获、`enable` 波形/死区 LA、注入组/TIM1_TRGO2。

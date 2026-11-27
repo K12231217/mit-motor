@@ -13,7 +13,7 @@
 //! Acquire `locked` 再读槽。所有槽都是 `AtomicU32`，不使用 `UnsafeCell`。
 //!
 //! 触发前不足 512 帧时，预触发窗口自然缩短；`summary` 返回实际 `pre` 数，不假装
-//! 有 25.6 ms。`arm()` 只能在锁存后调用，重新开始下一轮。
+//! 有 25.6 ms。锁存后保持停止，重新布防必须由写者自己（或已停止写者）执行。
 
 use core::mem::size_of;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -29,8 +29,6 @@ pub const DEFAULT_STRIDE: u32 = 1;
 
 /// 帧标志：冻结期间采集。
 pub const TRACE_FLAG_FROZEN: u8 = 1 << 0;
-/// 帧标志：HIL 自检帧，不是真实电流。
-pub const TRACE_FLAG_SELFTEST: u8 = 1 << 7;
 
 const _: () = assert!(TRACE_FRAMES.is_power_of_two());
 const _: () = assert!(PRE_FRAMES + POST_FRAMES == TRACE_FRAMES);
@@ -196,20 +194,6 @@ impl TraceRecorder {
         // 先发布窗口起点，再发布触发；写者看到 triggered 时一定看到 trigger_head。
         self.trigger_head.store(head, Ordering::Release);
         self.triggered.store(true, Ordering::Release);
-        true
-    }
-
-    /// 锁存后重新布防；未锁存返回 false，避免与写者竞争。
-    pub fn arm(&self) -> bool {
-        if !self.locked.load(Ordering::Acquire) {
-            return false;
-        }
-        self.head.store(0, Ordering::Relaxed);
-        self.trigger_head.store(0, Ordering::Relaxed);
-        self.post.store(0, Ordering::Relaxed);
-        self.period.store(0, Ordering::Relaxed);
-        self.triggered.store(false, Ordering::Relaxed);
-        self.locked.store(false, Ordering::Release);
         true
     }
 

@@ -12,6 +12,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "algorithms"
+version = "0.1.0"
+dependencies = [
+ "contracts",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -641,6 +648,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "mit-motor"
 version = "0.1.0"
 dependencies = [
+ "algorithms",
  "bsp",
  "contracts",
  "cortex-m",

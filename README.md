@@ -17,7 +17,7 @@ software/
   algorithms/    算法层（gate/encoder/fsm/foc/svpwm/sense/pid/current/supervisor）
   bsp/           thumb 板级层（clock/pwm 已实现；adc/encoder/dwt 待实现）
   firmware/      RTIC + embassy 应用（当前 S0 bring-up）
-  xtask/         唯一构建/门禁入口
+  xtask/         唯一构建/门禁/台架入口
 hardware/pcb/    网表、BOM、CubeMX
 mechanical/      装配/CAD/BOM
 docs/            SPEC、硬件/软件冷数据、archive
@@ -35,6 +35,9 @@ cargo xtask clippy       # -D warnings
 cargo xtask arch         # I1/I2/I3/I7
 cargo xtask hygiene      # H2/H4/H5/H6
 cargo xtask flash        # probe-rs（芯片名在 software/firmware/.cargo/config.toml）
+cargo xtask hil          # 编译+烧录+RTT，日志落 .scratch/hil/run.log
+cargo xtask rtt          # 只 attach 当前运行，不重新烧录
+cargo xtask dac 2 4095   # 台架静态拉高 DAC2/TP2，便于万用表测
 ```
 
 工具链由 `rust-toolchain.toml` 固定（`nightly-2025-11-05` 的 windows-gnu 主机；Linux/macOS 可用 `RUSTUP_TOOLCHAIN=stable`）。

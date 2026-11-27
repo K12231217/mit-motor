@@ -3,7 +3,7 @@
 //! Every build / check / size / flash action lives here so CLion, VS Code and
 //! CI execute the same code path. No extra tools (just, make) are required.
 //!
-//! Commands: check build rel fmt fmt-check clippy test doc size flash rtt arch
+//! Commands: check build rel fmt fmt-check clippy test doc size flash rtt hil dac arch
 //!           hygiene tier help
 
 mod checks;
@@ -12,7 +12,7 @@ mod tier;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, ExitStatus};
 
 pub(crate) const FW: &str = "software/firmware";
 
@@ -49,6 +49,10 @@ fn main() -> ExitCode {
         // `probe-rs run` comes from software/firmware/.cargo/config.toml (single source).
         "flash" => cargo(&["run", "--release"]),
         "rtt" => rtt(&rest),
+        // 台架主入口：编译 + 烧录 + 从复位开始抓 RTT，同时落一份日志。
+        "hil" if rest.is_empty() => hil(),
+        "hil" => Err(format!("`hil` takes no arguments (got {})", rest.join(" "))),
+        "dac" => dac(&rest),
         // 架构不变量（docs/software-architecture.md §9）的唯一实现在 checks.rs。
         "arch" if rest.is_empty() => checks::run(),
         "arch" => Err(format!(
@@ -103,6 +107,10 @@ usage: cargo xtask <command> [args]
               against the FLASH length in software/firmware/memory.x
   flash       cargo run --release (probe-rs runner from .cargo/config.toml)
   rtt         probe-rs attach --chip <chip from .cargo/config.toml> [args]
+  hil         build + flash + RTT from reset; log to .scratch/hil/run.log
+              (fixed TP card: docs/instrumentation.md)
+  dac <1|2> <code>
+              hold DAC1 channel on the target (e.g. `dac 2 4095` for TP2)
   arch        architecture invariants, pure Rust (docs/software-
               software-architecture.md §9): I1 dependency direction, I2 unsafe,
               I3 no heap; FAILs if the release ELF is missing
@@ -345,12 +353,108 @@ fn rtt(rest: &[String]) -> Result<(), String> {
     // resolved from the firmware dir, same as the `flash` runner.
     let elf = elf_path()?;
     let mut cmd = Command::new("probe-rs");
+    cmd.current_dir(FW).arg("attach").args(["--chip", &chip]);
+    add_configured_probe(&mut cmd);
+    cmd.arg(&elf).args(rest);
+    run_attached(&mut cmd)
+}
+
+/// 读 `.embeddedskills/config.json` 的 `probe-rs.probe`；多探针时不允许交互猜测。
+fn configured_probe() -> Option<String> {
+    let text = std::fs::read_to_string(".embeddedskills/config.json").ok()?;
+    let start = text.find("\"probe\"")?;
+    let after_key = &text[start + "\"probe\"".len()..];
+    let colon = after_key.find(':')?;
+    let value = after_key[colon + 1..].trim_start();
+    let value = value.strip_prefix('"')?;
+    let end = value.find('"')?;
+    let probe = &value[..end];
+    (!probe.is_empty()).then(|| probe.to_string())
+}
+
+fn add_configured_probe(cmd: &mut Command) {
+    if let Some(probe) = configured_probe() {
+        cmd.arg("--probe").arg(probe);
+    }
+}
+
+/// Hold a DAC1 channel for bench measurement; no firmware rebuild/reset.
+///
+/// DAC1 DHR12R1 = 0x5000_0808, DHR12R2 = 0x5000_0814 (G474).
+fn dac(args: &[String]) -> Result<(), String> {
+    if args.len() != 2 {
+        return Err("usage: cargo xtask dac <1|2> <0..4095>".to_string());
+    }
+    let channel = match args[0].as_str() {
+        "1" => 1usize,
+        "2" => 2usize,
+        _ => return Err("DAC channel must be 1 or 2".to_string()),
+    };
+    let code: u16 = args[1]
+        .parse()
+        .map_err(|_| "DAC code must be an integer 0..4095".to_string())?;
+    if code > 4095 {
+        return Err("DAC code must be 0..4095".to_string());
+    }
+    let address = 0x5000_0800u32 + 8 + (channel - 1) as u32 * 12;
+    let chip = chip_name()?;
+    let mut cmd = Command::new("probe-rs");
     cmd.current_dir(FW)
-        .arg("attach")
-        .args(["--chip", &chip])
-        .arg(&elf)
-        .args(rest);
+        .args(["write", "b32"])
+        .arg(format!("0x{address:08x}"))
+        .arg(code.to_string())
+        .args(["--chip", &chip]);
+    add_configured_probe(&mut cmd);
     run(&mut cmd)
+}
+
+/// 台架主入口：release 构型 + 烧录 + 从复位开始抓 RTT，并落盘。
+///
+/// `probe-rs run` 同时完成 flash 和 RTT，避免“先 flash、再 attach，启动日志已丢”的
+/// 常见操作失误。固定测试点只认 `docs/instrumentation.md`，本命令不引入新探针。
+fn hil() -> Result<(), String> {
+    println!("HIL bench card (fixed test points, docs/instrumentation.md):");
+    println!("  CH1 PA4/TP1  DAC1_OUT1 residual     0 A = 1.65 V");
+    println!("  CH2 PA5/TP2  DAC1_OUT2 freeze       0 V normal / 3.3 V frozen");
+    println!("  CH3 PB6      TP_SYNC_LOOP           20 kHz ISR envelope");
+    println!("  CH4 PB7      TP_SYNC_FREEZE         frozen window");
+    println!("  trigger: CH2 rising, single; start 10 ms/div, then 20 us/div for PWM");
+    println!();
+
+    cargo(&["build", "--release"])?;
+    let chip = chip_name()?;
+    let elf = elf_path()?;
+    let log_dir = std::env::current_dir()
+        .map_err(|e| format!("cannot get cwd: {e}"))?
+        .join(".scratch")
+        .join("hil");
+    std::fs::create_dir_all(&log_dir)
+        .map_err(|e| format!("cannot create {}: {e}", log_dir.display()))?;
+    let log = log_dir.join("run.log");
+    println!("RTT log: {}", log.display());
+
+    let mut cmd = Command::new("probe-rs");
+    cmd.current_dir(FW).arg("run").args(["--chip", &chip]);
+    add_configured_probe(&mut cmd);
+    cmd.arg("--target-output-file").arg(&log).arg(&elf);
+    run_attached(&mut cmd)
+}
+
+/// RTT 会话以 Ctrl+C 结束；Windows 返回 `STATUS_CONTROL_C_EXIT`，Unix 返回 130。
+fn run_attached(cmd: &mut Command) -> Result<(), String> {
+    let program = cmd.get_program().to_string_lossy().into_owned();
+    let status = cmd
+        .status()
+        .map_err(|e| format!("cannot run `{program}`: {e}"))?;
+    if status.success() || is_ctrl_c(status) {
+        Ok(())
+    } else {
+        Err(format!("`{program}` failed ({status})"))
+    }
+}
+
+fn is_ctrl_c(status: ExitStatus) -> bool {
+    matches!(status.code(), Some(130) | Some(-1_073_741_510))
 }
 
 /// Reads the probe-rs chip name out of the firmware runner, so the chip name
@@ -365,7 +469,7 @@ fn chip_name() -> Result<String, String> {
         }
         if let Some(i) = line.find("--chip ") {
             if let Some(name) = line[i + 7..].split_whitespace().next() {
-                return Ok(name.to_string());
+                return Ok(name.trim_matches('"').to_string());
             }
         }
     }

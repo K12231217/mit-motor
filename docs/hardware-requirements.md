@@ -118,7 +118,7 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 ```svg
 <svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">
   <line x1="180" y1="48" x2="400" y2="48" stroke="var(--muted)" stroke-width="1.2"/>
-  <text x="404" y="52" fill="var(--muted)">+3V3（= VREF+）</text>
+  <text x="404" y="52" fill="var(--muted)">TL431 2.5 V（VREF+）</text>
   <line x1="180" y1="270" x2="560" y2="270" stroke="var(--muted)" stroke-width="1.2"/>
   <text x="564" y="274" fill="var(--muted)">GND</text>
 
@@ -176,18 +176,18 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 |---|---|---|---|
 | HR-201 | 三路采样落在三个不同 ADC 单元（ADC1/ADC2/ADC3），由**同一 TIM1 事件**触发 | 目标偏斜 ≤ 50 ns；实测值写入测试记录，不做零假设 | HR-504 或 HR-804 |
 | HR-202 | 输入网络 | 100 Ω 串阻 + 100 pF 到 GND；三通道拓扑/取值/封装**完全一致**；采样时间 ≥ 68.5 cyc（@42.5 MHz ≈ 1.6 µs），推荐 92.5 cyc（2.2 µs）| 三通道互换电阻后零点与增益一致性 < 1 LSB |
-| HR-203 | 偏置与标度 | **4.99 kΩ/4.99 kΩ（±0.1 %，25 ppm）** → 静态 VREF/2、戴维南 2.495 kΩ、0.2712 V/A；12 bit → **2.97 mA/LSB**；±5 A 摆幅 ±1.356 V，电气满量程 ±6.08 A | 台架 ±7 点 × 双向（E1）|
+| HR-203 | 偏置与标度 | **4.99 kΩ/4.99 kΩ（±0.1 %，25 ppm）** → 静态 VREF/2、戴维南 2.495 kΩ、0.2712 V/A；12 bit → **2.25 mA/LSB**；±4.6 A 摆幅 ±1.247 V，电气满量程 ±4.61 A | 台架 ±7 点 × 双向（E1）|
 | HR-204 | **增益注入网络**（每相）| 默认 4.99k/4.99k；**上下各并联**一颗（串联会把 Rth 抬高 10 倍，见 [taskbook-review](archive/taskbook-review.md) §2）：并 47 k ⇒ **−9.5 %**，并 1.5 k ⇒ −25 %，换 6.8 k ⇒ +35 %；等值成对 ⇒ 零位保持 VREF/2 | 切换后零位漂移 < 5 mV（E4）|
 | HR-205 | 偏置注入网络（每相）| 18 kΩ→+3V3 ⇒ +0.74 A，**但增益同时 −12 %**（18 k 拉低戴维南）；100 kΩ ⇒ +0.15 A / −2.4 %；"纯偏置"应改单个分压电阻的贴装值而非并联注入 | 静态读数变化与预期差 < 5 %，增益耦合量实测记录（E5）|
 | HR-206 | 串联分流位置（每相）| 2512 **10 mΩ / 1 W** + 四线开尔文焊盘 + 0 Ω 旁路跳线；短接时相线直通 | 5 A 下 DMM 200 mV 档，误差 < 0.5 % |
-| HR-207 | 基准同源 | VREF+ 与 VDDA 接 +3V3（LDO），SOx 偏置也取自 +3V3；不装外部基准芯片（相对标定不需要；绝对刻度用 HR-810 反算 VDDA）| TP4 实测 3.3 V ±1 % |
+| HR-207 | 基准同源 | VREF+ 接 TL431 2.5 V（U10），VDDA 仍为 3V3 LDO；SOx 偏置取自 VREF+；不装外部基准芯片 | TP4 实测 2.49 V ±1 % |
 | HR-208 | 通道对称性 | 三路之间不允许任何单侧滤波、TVS 或不同封装；如需滤波必须三路同值 | 目视 + BOM 比对 |
 | HR-209 | SOx 节点可注入 | 保留裸 SOx 焊盘 + 100 Ω 隔离，允许外部源经串阻注入而不拆电阻 | 注入 ±1 mA 时读数线性 |
 | HR-210 | **（决策项）母线分流** | 1 mΩ + 差分放大 → PA0(ADC1_IN1)，默认不装；这是架构 §10 未决"是否需要第二观测通道"唯一的硬件入口 | 装机后与三路和电流对比 |
 | HR-211 | 外部电流真值通道 | **PB12(ADC4_IN3)** + 3 pin 接口（只出 `EXT_I_REF` 与 GND，**不要把 VREF+ 引到连接器**，见 [taskbook-review](archive/taskbook-review.md) P1-5）；100 Ω 串阻 + 钳位；与三路同帧采样，用来消掉跨仪器对时误差 | 与 DMM/INA240 读数在同一帧内对比，偏差 < 1 % |
 
-> HR-203 的边界：±6.08 A 时 SOx 节点贴到 0 V/3.3 V 轨，**工作区按 ±5 A 设计**，±6 A 只作为满量程定义。
-> 这一条必须写进论文，否则"2.97 mA/LSB"会被误读成全量程可用。
+> HR-203 的边界：±4.61 A 时 SOx 节点贴到 0 V/2.5 V 轨，**工作区按 ±4.6 A 设计**；这是 VREF+=2.5 V 的电气边界。
+> 这一条必须写进论文，否则"2.25 mA/LSB"会被误读成全量程可用。
 
 ### C. 时钟与时序（HR-3xx）
 
@@ -256,7 +256,7 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 | HR-802 | FMAC | 标定估计器的点积累加（最小二乘）用 FMAC，不进 20 kHz 环 | 10 ms 标定任务 CPU 占用 < 20 % |
 | HR-803 | DAC 模拟遥测 | **PA4（DAC1_OUT1）** 输出残差 r_k（0 A=2048，±0.5 A=0/4095）；**PA5（DAC1_OUT2）** 数字指示：正常 0，校准冻结 4095。1 µs 内可更新，TP1/TP2 | 示波器 CH2 上升沿单次触发；DAC 码与 RTT 回读一致 |
 | HR-804 | DAC → J_SYNC 自检 | PA4 经跳线驱动 J_SYNC 共点：三路 ADC 看同一 DAC 斜坡，**不需要外部信号源**即可测同步、线性与偏斜 | 三路读同一斜坡偏差 ≤ 2 LSB；扫相位得偏斜 |
-| HR-805 | 注入组 / 规则组分工 | 三路电流走 **ADC1/2/3 注入组**，由 **TIM1_TRGO 同步触发**；单一 JEOS 中断一次性读三路 JDR1 并打同一 `RawSample3.tick`。VBUS/NTC/VREFINT 走**规则组 + DMA 慢扫** | 20 kHz 下电流点不丢；三路 `tick` 相同；慢通道 1 ms 更新 |
+| HR-805 | 注入组 / 规则组分工 | 三路电流走 **ADC1/2/3 注入组**，由 **TIM1_TRGO 同步触发**；单一 JEOS 中断一次性读三路 JDR1 并打同一 `RawSample3.tick`。VBUS/NTC/VREFINT 走**规则组 + DMA 慢扫**。T-015 过渡实现先用规则组软件启动，**不满足本条的最终时序** | 20 kHz 下电流点不丢；三路 `tick` 相同；慢通道 1 ms 更新 |
 | HR-806 | ADC 模拟看门狗 | AWD1/2/3 设过流与采样越限阈值，超限直接进硬件中断（不依赖软件残差）| 注入超限电流，中断命中且动作在下一周期内 |
 | HR-807 | 硬件过采样 | 台架模式 4–16× 过采样（与 DMM 对齐）；控制环单次采样；模式可切 | 同一电流下读数稳定度 < 1 LSB |
 | HR-808 | 内部比较器 + DAC 阈值 | COMP2_INP 与 VBUS_ADC **同脚 PA3**，不需额外分压；DAC 作可调阈值 ⇒ 过压/欠压实验直接改固件数值；COMP2_OUT 引到空闲脚 **PA2** 供 LA 抓取（`PA2` 同时是 `COMP2_INM`，本设计用内部 DAC 作阈值，不占用该输入）。外部 TLV7021 保留为不依赖固件的硬保护 | 改 DAC 值即改翻转点；COMP→TIM1_BKIN 内部互连按 RM0440 §21 核对，不可用则仅作可观测 |
@@ -365,7 +365,7 @@ RTT：`clock=ok`、`pwm=ok arr=4250 dtg=85 moe=false aoe=false bke=false`。
 ### 4.2 T-013：电流采样 / DAC / 片内 OPAMP
 
 - `SOA/SOB/SOC`（U9.15/16/17）经 4.99 kΩ 网络进 `OPA3/OPA2/OPA1`（PB0/PA7/PA3）；**A/C 交叉**。
-- 静态偏置约 1.65 V（VREF+/2）；HR-203 标度 0.2712 V/A、2.97 mA/LSB。
+- 静态偏置约 1.25 V（VREF+/2 = 2.5/2）；HR-203 标度 0.2712 V/A、2.25 mA/LSB。
 - `DAC1_OUT1/2`（PA4/PA5，TP1/TP2）只到外部脚；T-014 用 OUT1 输出残差、OUT2 作冻结指示（HR-803），不再作内部采样链。
 - 片内 OPAMP1/2/3 follower，输出内部到 ADC1/2/3；无 OPAMP4/COMP2_OUT。
 
@@ -375,18 +375,27 @@ RTT：`clock=ok`、`pwm=ok arr=4250 dtg=85 moe=false aoe=false bke=false`。
 |---|---|---|
 | TP_SYNC_LOOP | PB6（59） | 20 kHz ISR 内高、退出低；bringup 自检只给短脉冲 |
 | TP_SYNC_FREEZE | PB7（60） | 冻结 50 ms 内高，随后低 |
-| DAC1_OUT1 | PA4（18）/ TP1 | 0 A = 1.65 V；自检回读 2048 |
-| DAC1_OUT2 | PA5（19）/ TP2 | 正常 0 V；冻结瞬间 3.3 V；自检回读 4095→0 |
+| DAC1_OUT1 | PA4（18）/ TP1 | 0 A = 1.25 V；自检回读 2048 |
+| DAC1_OUT2 | PA5（19）/ TP2 | 正常 0 V；冻结瞬间 2.49 V；自检回读 4095→0 |
 
 RTT 已见 `dwt=ok cycles=75`、`trace=freeze dac1=2048 dac2=4095`、`DATA,...`；
 **示波器/LA 物理波形尚未测**（192.168.1.77:5025 本会话不可达）。
+
+### 4.4 T-015：20 kHz current task HIL（PASS，ADC/rate）
+
+- `TIM1_UP_TIM16`；`RCR=1` 后 `isr_count=20013/s`（约 20.013 kHz），`isr_cycles≈1952`（约 11.5 µs）。
+- ADC 12 bit：`adc0 a/b/c≈2038`，残差 `-1 LSB`；录波 `pre=512 post=1536 len=2048 total=3536 locked=true`。
+- 根因：PAC `adc_v4` 的 `RES` 编码与 G474 不一致；`Res::TWELVEBIT` 实际写成 10 bit，
+  raw 509 是 1.247 V 的 10-bit 码。改为按 `CFGR[4:3]` 清 0 后恢复 12 bit。
+- `Pwm::wake()` 的 nSLEEP 等待改为 10 ms，消除 nFAULT 偶发低。
+- 未做：fix 后的 TP1/TP2 物理电压、`enable` 波形/死区 LA；注入组/TIM1_TRGO2 仍待实现。
 
 ## 5. 测试点与注入网络
 
 | TP | 网络 | 用途 |
 |---|---|---|
-| TP1 | DAC1_OUT1（PA4） | 残差 r_k 模拟输出；0 A≈1.65 V |
-| TP2 | DAC1_OUT2（PA5） | 冻结指示：0 V 正常 / 3.3 V 冻结 |
+| TP1 | DAC1_OUT1（PA4） | 残差 r_k 模拟输出；0 A≈1.25 V |
+| TP2 | DAC1_OUT2（PA5） | 冻结指示：0 V 正常 / 2.49 V 冻结 |
 | TP3 | 未分配 | 按实物确认 |
 | PB6/PB7 | TP_SYNC_LOOP/FREEZE | 推挽 GPIO；不再作 USART3 |
 

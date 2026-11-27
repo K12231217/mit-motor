@@ -61,7 +61,7 @@ H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一�
 | `lib.joint.service_contracts` | `software/contracts/src/lib.rs` | `lib` | crate 根与 re-export；无状态 |
 | `bsp.motor.service_clock` | `software/bsp/src/motor/service_clock.rs` | `init` | HSE 16M/PLL 170M 配置与读回；不匹配进 fault |
 | `bsp.motor.bus_pwm` | `software/bsp/src/motor/bus_pwm.rs` | `current @8` | TIM1 20 kHz/500 ns；无 BKIN（BKE=0）；enable 检查 nFAULT |
-| `bsp.motor.bus_adc` | `software/bsp/src/motor/bus_adc.rs` | `current @8` | ADC 注入组唯一所有者；三路同拍 |
+| `bsp.motor.bus_adc` | `software/bsp/src/motor/bus_adc.rs` | `current @8` | T-015 过渡：OPAMP+ADC 规则组软件启动；注入组/TIM1_TRGO2 待实现 |
 | `bsp.motor.bus_encoder` | `software/bsp/src/motor/bus_encoder.rs` | `current @8` | SPI1/主编码器唯一所有者；只搬字节 |
 | `bsp.motor.service_dwt` | `software/bsp/src/motor/service_dwt.rs` | `current @8` | DWT CYCCNT；先开 DCB.TRCENA，再使能计数器 |
 | `bsp.motor.service_timebase` | `software/bsp/src/motor/service_timebase.rs` | `init` | TIM5 1 MHz，defmt 时间戳；32 位回绕 |
@@ -118,7 +118,7 @@ software/bsp/                  # 唯一 unsafe 层（包名 bsp）[T-012 clock/p
   src/motor/mod.rs      #   motor 模块树
   src/motor/service_clock.rs   #   RCC 读回校验（embassy 配，bsp 验）
   src/motor/bus_pwm.rs         #   TIM1：6 路 + BDTR 死区（本板无 BKIN）
-  src/motor/bus_adc.rs         #   ADC1/2/3 注入组 + TIM1_TRGO2 + DMA + 窗口判据
+  src/motor/bus_adc.rs         #   OPAMP1/2/3 + ADC1/2/3 规则组（过渡）；注入组/TIM1_TRGO2 待实现
   src/motor/bus_encoder.rs     #   SPI1 双 CS + MT6701 读帧
   src/motor/service_dwt.rs     #   CYCCNT 计时与剖面（先 DCB.TRCENA）
   src/motor/service_timebase.rs#   TIM5 @1 MHz；defmt 时间戳

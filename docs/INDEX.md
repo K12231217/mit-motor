@@ -10,7 +10,7 @@
 | 主控 | STM32G474RBT6，LQFP64，128 KB Flash / 128 KB SRAM |
 | 板卡 | 2026-11-27 最新网表 `hardware/pcb/Netlist_Schematic14_1_2026-11-27.tel`；PCB14 是 G491RET6 旧板 |
 | 驱动 | MP6540HA（`MP6540HGU-A-Z`），HS/LS 六电平输入，无 EN、无内部死区 |
-| 电流采样 | SOx 1/9200 + 4.99 kΩ/4.99 kΩ 偏置；0.2712 V/A、2.97 mA/LSB；片内 OPAMP1/2/3 follower |
+| 电流采样 | SOx 1/9200 + 4.99 kΩ/4.99 kΩ 偏置；0.2712 V/A、2.25 mA/LSB；片内 OPAMP1/2/3 follower |
 | 相序 | `SOA→OPA3/PB0`、`SOB→OPA2/PA7`、`SOC→OPA1/PA3`（A/C 交叉；详见 HR §3.1） |
 | 时钟 | HSE 16 MHz → PLL M4/N85/R2 = 170 MHz；ADC PLLP/8 = 42.5 MHz |
 | PWM | TIM1 中心对齐 20 kHz，ARR=4250；死区 500 ns（待 LA 实测）；`AOE=0`；**本板无 BKIN** |
@@ -19,7 +19,7 @@
 | 工具链 | `nightly-2025-11-05-x86_64-pc-windows-gnu` + `thumbv7em-none-eabihf` |
 | 构建 | `cargo xtask <cmd>`，唯一实现 `software/xtask/src/main.rs` |
 | workspace | 根 workspace = `software/contracts` + `software/algorithms`；`software/firmware`/`bsp`/`xtask` 独立 |
-| 当前状态 | `software/bsp` clock/pwm/dwt/timebase/trace 已实现；T-012 safe-off **HIL PASS**；T-014 pre/post 环 + stride **HIL PASS**（`pre=512/post=1536`，stride 1/10）；adc/encoder 仍 `todo!()`；`enable` 波形/LA 未做 |
+| 当前状态 | `software/bsp` clock/pwm/dwt/timebase/trace 已实现；T-012 safe-off **HIL PASS**；T-014 pre/post 环 + stride **HIL PASS**；T-015 20 kHz current task **HIL PASS（ADC/rate）**（`adc0≈2038`、`r_lsb≈-1`、`isr_count≈20013/s`）；encoder 仍 `todo!()`；`enable` 波形/LA 未做 |
 
 > 测试数、镜像大小、门禁结果不写死：跑 `cargo xtask test` / `size` / `arch` / `hygiene`，以命令输出为准。
 

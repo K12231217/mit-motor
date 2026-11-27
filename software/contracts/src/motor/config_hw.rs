@@ -49,8 +49,10 @@ pub const D_MAX: f32 = D_MAX_PERMILLE as f32 / 1000.0;
 /// 同时触发与走线等长保证；实测值进遥测（HR-201/HR-202）。
 pub const ADC_PAIR_SKEW_MAX_NS: u16 = 50;
 
-/// ADC 参考电压，单位 V（VREF+ 接 3V3 轨，TL431 的 2.5 V 只喂比较器）。
-pub const VREF_V: f32 = 3.3;
+/// ADC 参考电压，单位 V（VREF+ = TL431 2.5 V，不是 3V3）。
+///
+/// 2026-11-27 实测：U1.28/TP4 = 2.4948 V，六点 1.2474 V。
+pub const VREF_V: f32 = 2.5;
 
 /// 12 bit ADC 的满量程码数（`2^12`）。
 pub const ADC_FULL_SCALE_CODE: f32 = 4_096.0;
@@ -75,7 +77,7 @@ pub const SOX_VOLTS_PER_AMP: f32 = SOX_RATIO_PER_AMP * SOX_LOAD_OHMS;
 
 /// 每 LSB 对应的相电流，单位 A/LSB：`VREF_V / ADC_FULL_SCALE_CODE / SOX_VOLTS_PER_AMP`。
 ///
-/// 数值约 2.97 mA/LSB（HR-203）。工作区按 ±5 A 设计，±6.08 A 只是电气满量程。
+/// 数值约 2.25 mA/LSB（HR-203）。2.5 V 基准下电气满量程约 ±4.61 A。
 pub const SOX_AMPS_PER_LSB: f32 = VREF_V / ADC_FULL_SCALE_CODE / SOX_VOLTS_PER_AMP;
 
 /// 帧长，单位 bit（24）。
@@ -138,10 +140,10 @@ const _: () = assert!(D_MAX > 0.0);
 const _: () = assert!(D_MAX < 1.0);
 const _: () = assert!(ADC_PAIR_SKEW_MAX_NS > 0);
 
-// 采样标度钉在 HR-203 的两个特征值上（0.2712 V/A、2.97 mA/LSB），留 ±1 % 容差：
+// 采样标度钉在 HR-203 的两个特征值上（0.2712 V/A、2.25 mA/LSB），留 ±1 % 容差：
 // 改分压或改参考电压必须同时改这里，否则编译失败。
 const _: () = assert!(SOX_VOLTS_PER_AMP > 0.268 && SOX_VOLTS_PER_AMP < 0.274);
-const _: () = assert!(SOX_AMPS_PER_LSB > 0.002_94 && SOX_AMPS_PER_LSB < 0.003_00);
+const _: () = assert!(SOX_AMPS_PER_LSB > 0.002_23 && SOX_AMPS_PER_LSB < 0.002_28);
 const _: () = assert!(ADC_MIDSCALE_CODE * 2.0 == ADC_FULL_SCALE_CODE);
 
 // 硬约束：半周期减去高边占用后必须仍容得下采样窗口。

@@ -377,7 +377,7 @@ impl GroupWindow {
     }
 
     /// 组内累加一拍。`theta` 是当前生效的 `active_theta`，组内冻结不变。
-    pub(super) fn push(&mut self, s_lsb: [f32; 3], theta: [f32; 2], group_samples: u32) {
+    pub(super) fn push(&mut self, s_lsb: [f32; 3], theta: [f32; 2], group_samples: u32) -> f32 {
         let [sa, sb, sc] = s_lsb;
         let [t0, t1] = theta;
         self.accum.push(s_lsb, 1.0, theta, 1.0, None);
@@ -396,6 +396,7 @@ impl GroupWindow {
         } else {
             self.half_b.push(s_lsb, 1.0);
         }
+        residual
     }
 }
 
