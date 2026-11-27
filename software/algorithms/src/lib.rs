@@ -37,10 +37,10 @@ pub mod motor;
 
 pub use crate::joint::service_fsm::step;
 pub use crate::motor::chain_current::{CurrentLoop, MotorParams};
-pub use crate::motor::chain_foc::{AlphaBeta, AlphaBetaVolts, Dq};
-pub use crate::motor::chain_pid::Pi;
+pub use crate::motor::chain_foc::{AlphaBeta, AlphaBetaVolts, Dq, SinCos};
+pub use crate::motor::chain_pid::{Pi, PiOutput};
 pub use crate::motor::chain_sense::SenseParams;
-pub use crate::motor::chain_svpwm::Sector;
+pub use crate::motor::chain_svpwm::{normalize_volts_with_inv, Sector};
 pub use crate::motor::config_motor::WK4310H;
 pub use crate::motor::service_encoder::{
     angle_rad, jump_limit_lsb, parse, AngleOutcome, EncoderMonitor, EncoderParams, Fault, Frame,

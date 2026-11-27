@@ -13,7 +13,8 @@
 
 - 代码已按用途分组：`software/{contracts,algorithms,bsp,firmware,xtask}`；硬件资料 `hardware/pcb/`。
 - 最新网表：`hardware/pcb/Netlist_Schematic14_1_2026-11-27.tel`（以此为准）。
-- T-012 的代码/文档改动尚未提交：工作区正由另一路做目录重排；等重排落地后做一个 `feat(T-012)`。
+- T-012 的代码/文档改动与目录重排同批提交；`main` 仍只读回、不 `enable`。
+- T-010（远端）已并入：载波保持 20 kHz，`SinCos`/`PiOutput`/`1/vbus` 缓存等 P0/P1 优化保留。
 - 引脚/测试点只查 `docs/hardware-requirements.md` §3.1 / §5；不复制到别处。
 
 ## 3. HIL

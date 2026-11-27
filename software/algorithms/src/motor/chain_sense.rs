@@ -42,6 +42,7 @@ impl Default for SenseParams {
 /// 只接收码数组，不接收 `RawSample3`：拍号与时效判据由采集端负责，归算只做线性换算。
 /// 三相独立换算，不做零和修正：共模分量必须留给 `gate` 看见。正电流方向（`SOx` 极性）
 /// 尚未上台架验证，见 `docs/INDEX.md` 的未决项。
+#[inline]
 pub fn currents(params: &SenseParams, code: [u16; 3]) -> PhaseCurrent {
     let [code_a, code_b, code_c] = code;
     let [offset_a, offset_b, offset_c] = params.offset_code;

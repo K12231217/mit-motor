@@ -54,8 +54,31 @@ pub fn angle_rad(angle_raw: u16) -> f32 {
     f32::from(angle_raw) * RAD_PER_COUNT
 }
 
+// CRC-6 逐 6 bit 的状态转移表：`update(crc, chunk) = CRC6_STATE[crc] ^ chunk`。
+// 多项式 `x^6 + x + 1`、初值 0；由 `crc6()` 逐位实现推导并测试对齐。
+const CRC6_STATE: [u8; 64] = [
+    0, 3, 6, 5, 12, 15, 10, 9, 24, 27, 30, 29, 20, 23, 18, 17, 48, 51, 54, 53, 60, 63, 58, 57, 40,
+    43, 46, 45, 36, 39, 34, 33, 35, 32, 37, 38, 47, 44, 41, 42, 59, 56, 61, 62, 55, 52, 49, 50, 19,
+    16, 21, 22, 31, 28, 25, 26, 11, 8, 13, 14, 7, 4, 1, 2,
+];
+
+/// 一拍 6 bit 的 CRC 状态转移；表长固定为 64，`get` 的越界分支不可达。
+fn crc6_step(crc: u8, chunk: u8) -> u8 {
+    CRC6_STATE.get(usize::from(crc)).copied().unwrap_or(0) ^ (chunk & 0x3F)
+}
+
+/// 24 bit 整帧的 CRC 余数；合法码字（18 bit 载荷 + 6 bit CRC）结果为 0。
+fn crc6_word(word: u32) -> u8 {
+    let mut crc = 0u8;
+    crc = crc6_step(crc, ((word >> 18) & 0x3F) as u8);
+    crc = crc6_step(crc, ((word >> 12) & 0x3F) as u8);
+    crc = crc6_step(crc, ((word >> 6) & 0x3F) as u8);
+    crc6_step(crc, (word & 0x3F) as u8)
+}
+
 // CRC-6：`x^6 + x + 1`，初值 0，`payload` 为前 18 bit（D 与 Mg）。
-// 24 bit 长除法：把 `payload << 6` 逐位除以 `0x43`，余数即 CRC。
+// 逐位长除法；只用于构造测试向量与校验查表实现。
+#[cfg(test)]
 pub(super) const fn crc6(payload: u32) -> u8 {
     const POLY: u32 = hw::ENC_CRC_POLY as u32;
     const SHIFT: u32 = hw::ENC_CRC_BITS as u32;
@@ -81,7 +104,7 @@ pub fn parse(raw: [u8; 3]) -> Result<Frame, FrameError> {
     let [hi, mid, lo] = raw;
     let word = (u32::from(hi) << 16) | (u32::from(mid) << 8) | u32::from(lo);
     let crc = (word & CRC_MASK) as u8;
-    if crc6(word >> hw::ENC_CRC_BITS) != crc {
+    if crc6_word(word) != 0 {
         return Err(FrameError::Crc);
     }
     Ok(Frame {

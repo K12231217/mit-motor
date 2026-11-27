@@ -1,4 +1,6 @@
-use super::{clarke, inverse_park, park, sin_cos, AlphaBeta, Dq};
+use super::{
+    clarke, inverse_park, inverse_park_with, park, park_with, sin_cos, AlphaBeta, Dq, SinCos,
+};
 use contracts::motor::protocol_types::PhaseCurrent;
 use std::f32::consts::{PI, TAU};
 
@@ -92,4 +94,21 @@ fn inverse_park_and_park_round_trip() {
         assert!(close(back.q_amps, expected.q_amps, 1e-2), "q at {theta}");
         theta += 0.05;
     }
+}
+
+#[test]
+fn cached_sincos_matches_direct_paths() {
+    let theta = 0.7f32;
+    let (sin, cos) = sin_cos(theta);
+    let frame = SinCos { sin, cos };
+    let ab = AlphaBeta {
+        alpha_amps: 1.2,
+        beta_amps: -0.8,
+    };
+
+    assert_eq!(park_with(frame, ab), park(ab, theta));
+    assert_eq!(
+        inverse_park_with(frame, 0.9, -0.3),
+        inverse_park(0.9, -0.3, theta)
+    );
 }

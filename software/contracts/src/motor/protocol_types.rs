@@ -35,6 +35,7 @@ impl Q15 {
     }
 
     /// 纯换算：定点 → 比值，除以 `2^15`，无分支。
+    #[inline]
     pub fn to_ratio(self) -> f32 {
         f32::from(self.0) / Q15_FULL_SCALE
     }
@@ -48,6 +49,7 @@ impl Q15 {
     ///
     /// `+1.0` 对应 `32768`，超出 `i16`，因此正饱和值是 [`Self::MAX`]（`32767`）；
     /// `-1.0` 恰好是 [`Self::MIN`]。
+    #[inline]
     pub fn from_ratio(ratio: f32) -> Self {
         if ratio.is_nan() {
             return Self::ZERO;
@@ -98,6 +100,7 @@ impl ClampedModulation {
     /// 受检构造：超限直接返回 `Err`，由边界入口决定进 Fault 还是饱和。
     ///
     /// 返回原始 `Q15` 而不是丢值，便于调用方把拒绝的码写进遥测。
+    #[inline]
     pub const fn try_new(q: Q15) -> Result<Self, Q15> {
         let raw = q.raw();
         let limit = MODULATION_MAX_RAW;
@@ -112,6 +115,7 @@ impl ClampedModulation {
     ///
     /// 只给"算法给出小幅越界、策略就是饱和"的入口用；需要区分故障时用
     /// [`Self::try_new`]。
+    #[inline]
     pub const fn new_clamped(q: Q15) -> Self {
         let max = MODULATION_MAX_RAW;
         let raw = q.raw();
@@ -126,6 +130,7 @@ impl ClampedModulation {
     }
 
     /// 纯取值：把调制量交回定点域。
+    #[inline]
     pub const fn get(self) -> Q15 {
         self.0
     }
