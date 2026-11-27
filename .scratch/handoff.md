@@ -54,7 +54,7 @@ HIL: PASS 2026-11-27 T-015 20 kHz current task（ADC/rate）
 - 已实现并 HIL 通过：ADC1/2/3 注入组 + TIM1_TRGO2 + 三路 JDR1。
 - HIL：`adc0 a/b/c≈2039`、`isr_count=20004/s`、`isr_cycles≈2005`、`errors=0`；注入组必须 `JQDIS=1` 且 `JADSTART=1`（RM0440 §21.4.15/§21.4.18）。
 - 未做：`enable` 20 kHz/500 ns 波形与死区 LA；低边窗口判定。
-- 复位启动：`Trace` 提前初始化；`Pwm::wake` 的 nFAULT 等待从 10 ms 放宽到 100 ms；wake/ADC/零位/门控失败时 TP2+PB7 常高作故障码。20 次 SWD 复位均正常，但手动复位“全无输出”尚未复现；若再出现，先看 TP2/PB7 是否常高。
+- 复位启动：最早期把 PB7 拉高作“已进 init”标记；`Trace` 提前初始化；`Pwm::wake` 的 nFAULT 等待从 10 ms 放宽到 100 ms；时钟校验重试 10×10 ms；wake/ADC/零位/门控失败时 TP2+PB7 常高作故障码。20 次 SWD 复位均正常，但手动复位“全无输出”尚未复现；若再出现，先看 PB7 与 TP2 是否常高。
 
 ## 4. 待裁决（人）
 

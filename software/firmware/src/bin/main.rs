@@ -83,6 +83,14 @@ mod app {
 
     #[init]
     fn init(cx: init::Context) -> (Shared, Local) {
+        // Earliest boot marker before embassy clock setup: PB7 high means the
+        // core reached init. Trace::init later reconfigures PB7 low.
+        pac::RCC.ahb2enr().modify(|w| w.set_gpioben(true));
+        pac::GPIOB
+            .moder()
+            .modify(|w| w.set_moder(7, pac::gpio::vals::Moder::OUTPUT));
+        pac::GPIOB.bsrr().write(|w| w.set_bs(7, true));
+
         Mono::start(cx.core.SYST, SYS_CLK_HZ);
 
         let p = embassy_stm32::init(service_clock::config());
@@ -90,7 +98,15 @@ mod app {
         // TIM5 must be configured before the first info! for real microsecond stamps.
         let _timebase = ServiceTimebase::init(p.TIM5);
 
-        if !service_clock::verify() {
+        let mut clock_ok = false;
+        for _ in 0..10 {
+            if service_clock::verify() {
+                clock_ok = true;
+                break;
+            }
+            cortex_m::asm::delay(SYS_CLK_HZ / 300);
+        }
+        if !clock_ok {
             defmt::error!("clock=bad: expected HSE 16M/PLL 170M, AHB/APB undivided");
             loop {
                 core::hint::spin_loop();

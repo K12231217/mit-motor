@@ -189,7 +189,8 @@ cargo xtask hil --boot-freeze
 cargo xtask rtt
 ```
 
-若复位后 **TP1 有 1.25 V、TP2/PB7 常高、PB6 没有 20 kHz**，不是芯片卡死，是初始化在某一步停下：
+复位最早期用 **PB7 拉高** 作为“CPU 已进入 `init`”标记（`Trace::init` 后恢复低）。若 PB7 也低，说明还没走到固件 init；先查 NRST/BOOT0/调试器是否把核停住。
+若复位后 **PB7 常高、TP1 仍为 0 V**，停在 embassy 时钟配置或 100 ms 时钟校验；TP1 有 1.25 V、TP2/PB7 常高、PB6 没有 20 kHz，则是 wake/ADC/零位/门控故障：
 `Pwm::wake`（nFAULT 100 ms 仍低）、ADC 校准/零位或门控零位失败都会走这条可见故障码。
 RTT 会给出对应的 `driver=wake fail` / `adc=bad` / `adc0=bad` / `gate=bad`。
 TP2 的冻结脉冲只有约 **76.8 ms**，万用表/自动触发容易错过。需要静态测 DAC 时，直接按住通道：
