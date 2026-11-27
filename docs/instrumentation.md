@@ -166,7 +166,7 @@ cargo xtask hil
 cargo xtask hil --boot-freeze
 ```
 
-下一步零矢量使能（不接电机、限流；只验证 MOE/20 kHz，不证明低边窗口）：
+零矢量使能（不接电机、限流；已验证 MOE/20 kHz，不证明低边窗口）：
 
 ```sh
 cargo xtask hil --enable-zero
