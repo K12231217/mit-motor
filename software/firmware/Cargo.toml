@@ -61,6 +61,7 @@ bsp = { path = "../bsp" }
 embassy-stm32 = { version = "0.1.0", features = [ "defmt", "time-driver-any", "stm32g474rb", "unstable-pac", "exti"]  }
 
 defmt = "0.3"
+contracts = { path = "../contracts" }
 defmt-rtt = "0.4"
 
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }

@@ -15,10 +15,11 @@
 | 时钟 | HSE 16 MHz → PLL M4/N85/R2 = 170 MHz；ADC PLLP/8 = 42.5 MHz |
 | PWM | TIM1 中心对齐 20 kHz，ARR=4250；死区 500 ns（待 LA 实测）；`AOE=0`；**本板无 BKIN** |
 | 安全脚 | `nSLEEP=PC7`、`nFAULT=PC8`；硬件过压 break 缺口，`BKE=0` |
+| 调试 | RTT only；`PB6/PB7=TP_SYNC_LOOP/FREEZE`（不启用 USART3）；`PA4/PA5=DAC1_OUT1/2`（残差/冻结） |
 | 工具链 | `nightly-2025-11-05-x86_64-pc-windows-gnu` + `thumbv7em-none-eabihf` |
 | 构建 | `cargo xtask <cmd>`，唯一实现 `software/xtask/src/main.rs` |
 | workspace | 根 workspace = `software/contracts` + `software/algorithms`；`software/firmware`/`bsp`/`xtask` 独立 |
-| 当前状态 | `software/bsp` clock/pwm 已实现；T-012 safe-off **HIL PASS**（170 MHz、ARR=4250、DTG=85、MOE/AOE/BKE=false）；adc/encoder/dwt 仍 `todo!()`；`enable` 波形/LA 未做 |
+| 当前状态 | `software/bsp` clock/pwm/dwt/timebase/trace 已实现；T-012 safe-off **HIL PASS**；T-014 pre/post 环 + stride **HIL PASS**（`pre=512/post=1536`，stride 1/10）；adc/encoder 仍 `todo!()`；`enable` 波形/LA 未做 |
 
 > 测试数、镜像大小、门禁结果不写死：跑 `cargo xtask test` / `size` / `arch` / `hygiene`，以命令输出为准。
 
@@ -28,6 +29,7 @@
 |---|---|
 | [`hardware-requirements.md`](hardware-requirements.md) | 引脚 §3.1、采样/安全、测试点 §5、实验 E1–E6、投板检查 |
 | [`software-architecture.md`](software-architecture.md) | 文件/模块边界、模块注册表、不变量 I1–I7、门禁落点 |
+| [`instrumentation.md`](instrumentation.md) | TP_SYNC/DAC、TIM5/DWT、defmt 过滤、DATA 行与录波容量 |
 | [`motor-wk4310h.md`](motor-wk4310h.md) | WK4310H 铭牌、极对、每相/磁链换算 |
 | [`archive/`](archive/) | 历史 ADR 全文、研究/任务书、旧 HIL 表；**不冷启动** |
 

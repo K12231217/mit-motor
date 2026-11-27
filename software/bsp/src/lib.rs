@@ -26,6 +26,10 @@ pub struct Board {
     pub enc: motor::bus_encoder::Encoder,
     /// DWT 周期计数。
     pub dwt: motor::service_dwt::Dwt,
+    /// TIM5 1 MHz 时间戳。
+    pub timebase: motor::service_timebase::Timebase,
+    /// DAC/TP_SYNC 遥测。
+    pub trace: motor::service_trace::Trace,
 }
 
 /// 上电初始化：时钟读回 → GPIO/PWM/ADC/SPI/DWT。

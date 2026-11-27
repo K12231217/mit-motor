@@ -7,7 +7,12 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-const SCAN_ROOTS: [&str; 4] = ["software/contracts/src", "software/bsp/src", "software/algorithms/src", "software/firmware/src"];
+const SCAN_ROOTS: [&str; 4] = [
+    "software/contracts/src",
+    "software/bsp/src",
+    "software/algorithms/src",
+    "software/firmware/src",
+];
 const ARCH_DOC: &str = "docs/software-architecture.md";
 const REGISTRY_START: &str = "<!-- module-registry:start -->";
 const REGISTRY_END: &str = "<!-- module-registry:end -->";
@@ -354,9 +359,7 @@ fn valid_module_id(id: &str) -> bool {
     if parts.len() != 3 {
         return false;
     }
-    LAYERS.contains(&parts[0])
-        && DOMAINS.contains(&parts[1])
-        && valid_role_qualifier(parts[2])
+    LAYERS.contains(&parts[0]) && DOMAINS.contains(&parts[1]) && valid_role_qualifier(parts[2])
 }
 
 fn valid_role_qualifier(part: &str) -> bool {
@@ -408,7 +411,10 @@ fn path_matches_id(path: &str, id: &str) -> bool {
 
 fn layer_matches(path: &str, layer: &str) -> bool {
     match layer {
-        "lib" => path.starts_with("software/contracts/src/") || path.starts_with("software/algorithms/src/"),
+        "lib" => {
+            path.starts_with("software/contracts/src/")
+                || path.starts_with("software/algorithms/src/")
+        }
         "bsp" => path.starts_with("software/bsp/src/"),
         "app" => path.starts_with("software/firmware/src/"),
         "dev" => true,

@@ -63,7 +63,9 @@ H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一�
 | `bsp.motor.bus_pwm` | `software/bsp/src/motor/bus_pwm.rs` | `current @8` | TIM1 20 kHz/500 ns；无 BKIN（BKE=0）；enable 检查 nFAULT |
 | `bsp.motor.bus_adc` | `software/bsp/src/motor/bus_adc.rs` | `current @8` | ADC 注入组唯一所有者；三路同拍 |
 | `bsp.motor.bus_encoder` | `software/bsp/src/motor/bus_encoder.rs` | `current @8` | SPI1/主编码器唯一所有者；只搬字节 |
-| `bsp.motor.service_dwt` | `software/bsp/src/motor/service_dwt.rs` | `current @8` | DWT 周期计数；只读 |
+| `bsp.motor.service_dwt` | `software/bsp/src/motor/service_dwt.rs` | `current @8` | DWT CYCCNT；先开 DCB.TRCENA，再使能计数器 |
+| `bsp.motor.service_timebase` | `software/bsp/src/motor/service_timebase.rs` | `init` | TIM5 1 MHz，defmt 时间戳；32 位回绕 |
+| `bsp.motor.service_trace` | `software/bsp/src/motor/service_trace.rs` | `current @8` | PB6/PB7 TP_SYNC、DAC1 残差/冻结；无锁无日志 |
 | `bsp.joint.service_board` | `software/bsp/src/lib.rs` | `init` | Board 单实例；构造后 move 移交 |
 | `lib.motor.service_gate` | `software/algorithms/src/motor/service_gate` | `calib @2` | GainGate 唯一写者；组窗不写主窗 |
 | `lib.motor.service_encoder` | `software/algorithms/src/motor/service_encoder` | `current @8` | SPI1 唯一所有者；帧判据纯函数 |
@@ -118,7 +120,9 @@ software/bsp/                  # 唯一 unsafe 层（包名 bsp）[T-012 clock/p
   src/motor/bus_pwm.rs         #   TIM1：6 路 + BDTR 死区（本板无 BKIN）
   src/motor/bus_adc.rs         #   ADC1/2/3 注入组 + TIM1_TRGO2 + DMA + 窗口判据
   src/motor/bus_encoder.rs     #   SPI1 双 CS + MT6701 读帧
-  src/motor/service_dwt.rs     #   CYCCNT 计时与剖面
+  src/motor/service_dwt.rs     #   CYCCNT 计时与剖面（先 DCB.TRCENA）
+  src/motor/service_timebase.rs#   TIM5 @1 MHz；defmt 时间戳
+  src/motor/service_trace.rs  #   PB6/PB7 TP_SYNC + DAC1_OUT1/2 遥测
   src/motor/bus_dma.rs         #   [计划] 3 通道搬运与完成序
   src/motor/bus_can.rs         #   [计划] FDCAN2（embassy-stm32 包装，类型不外泄）
   src/joint/bus_uart.rs        #   [计划] 调试串口：最简阻塞写，fault dump 专用
@@ -131,8 +135,11 @@ software/system/               # 服务层（包名 system），forbid(unsafe)
   src/log.rs            #   try_log：无锁环，满则丢；flush 只在最低优先级
   src/time.rs           #   TIM5 @1 MHz + 64 位溢出扩展（TIM2 归 embassy 时基）
   src/queue.rs          #   事件/指令/日志队列封装（容量来自 contracts）
-  src/trace.rs          #   [计划] Snapshot → TraceFrame 打包（含 flags 位）
+  src/trace.rs          #   [计划] Snapshot → TraceFrame 打包（含 flags 位；当前实现见 firmware/src/bin/trace/mod.rs）
   src/watchdog.rs       #   通信中断 > 20 ms 停机
+
+> T-014 先把 TIM5/DWT/trace 放在 `bsp.motor.*` 与 `firmware/src/bin/trace`；`system` 建后迁移，不复制两份。
+> 当前 TIM5 是 32 位直读（71.58 min 回绕），`system/time.rs` 的 64 位扩展尚未实现。
 
 software/algorithms/                 # 纯算法（包名 algorithms），no_std + forbid(unsafe)，x86 可测
   src/lib.rs            #   #![no_std] #![forbid(unsafe_code)]；公共头
@@ -177,7 +184,8 @@ software/app/                  # 装配（包名 app，bin）[未建]
   src/app/motor/task_telemetry.rs  #   prio 5：遥测
 
 software/firmware/               # 现有探针（独立 workspace，单 bin main，无电机代码）
-  src/bin/main.rs       #   S0 bring-up：时钟读回 / Board 所有权 / 一次 ADC 采样
+  src/bin/main.rs       #   S0 bring-up：时钟读回 / Board 所有权 / PWM 安全关断 / trace HIL
+  src/bin/trace/mod.rs  #   TraceFrame 16 B + 512/1536 预/后触发环 + stride + DATA 行
 ```
 
 > **一处修正**：async 任务的**外壳**放 `software/app/src/tasks/io.rs`，业务函数放 `algorithms`。
@@ -345,7 +353,7 @@ impl Board {
 
 | 区 | 位置 | 内容 | 大小 |
 |---|---|---|---|
-| `.uninit.trace` | SRAM2 @0x20014000 | `TraceFrame[1024]`（16 B/帧）| 16 KB |
+| `.uninit.trace` | SRAM2 @0x20014000 | `TraceFrame[1024]`（16 B/帧）| 16 KB（**规划**；当前 T-014 用 `.bss` 2048 帧=32 KB） |
 | `.uninit.log` | SRAM2 +16K | `LogEntry[512]`（12 B/条）| 6 KB |
 | `.uninit.magic` | SRAM2 +22K | magic + 版本 + CRC | 256 B |
 | BKPR0..15 | RTC 备份寄存器 | 标定摘要（定点零位/增益、板 UID、OVP 实测点）| 64 B |

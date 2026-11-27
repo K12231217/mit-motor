@@ -222,7 +222,8 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 | HR-504 | J_SYNC | 三路 ADC 输入经 3 位跳线可共接到同一注入节点（外部信号源或 TP17 的 DAC 驱动）| 方波能同时出现在三路 |
 | HR-505 | 状态指示 | **最新网表无 MCU LED**（只有电源指示 LED1）；状态以 RTT/帧为准 | — |
 | HR-506 | SWD | PA13/PA14 + NRST(7) + 3V3 + GND，5 pin 2.54 或 10 pin 1.27；PB3 = SPI1_SCK 故 **SWO 不可用**，调试输出走 RTT | probe-rs 烧写 + RTT |
-| HR-507 | 串口 | 最新网表 `USART3_TX/RX` 在 **PB6/PB7**（实际 AF 需核对）；3 pin，115200–1 M | 环回测试 |
+| HR-507 | 调试日志 | **RTT only**；PB6/PB7 的 USART3 网络本季不启用，改作 TP_SYNC 推挽输出（见 HR-510） | RTT 可读；PB6/PB7 静态低 |
+| HR-510 | TP_SYNC | **PB6 = TP_SYNC_LOOP**（20 kHz ISR 内高，退出低）；**PB7 = TP_SYNC_FREEZE**（冻结期间高，与 DAC1_OUT2 同相）。3.3 V 推挽，禁止再分配给 USART3 | 示波器/LA 上升沿对齐 DAC；20 kHz 周期 50 µs |
 
 ### F. 结构与工艺（HR-6xx）
 
@@ -253,7 +254,7 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 |---|---|---|---|
 | HR-801 | CORDIC | Park / inverse Park 与 atan2 走 CORDIC，取代查表与多项式 | DWT 计时：单次电流环 < 25 µs 且余量可读 |
 | HR-802 | FMAC | 标定估计器的点积累加（最小二乘）用 FMAC，不进 20 kHz 环 | 10 ms 标定任务 CPU 占用 < 20 % |
-| HR-803 | DAC 模拟遥测 | **PA4（DAC1_OUT1）** 输出可选变量（i_a / i_q / 残差 / 标定状态），1 µs 更新 + RC 低通 → TP17；PA5(DAC1_OUT2) 预留 | 波形与 STROBE1 同拍对齐 |
+| HR-803 | DAC 模拟遥测 | **PA4（DAC1_OUT1）** 输出残差 r_k（0 A=2048，±0.5 A=0/4095）；**PA5（DAC1_OUT2）** 数字指示：正常 0，校准冻结 4095。1 µs 内可更新，TP1/TP2 | 示波器 CH2 上升沿单次触发；DAC 码与 RTT 回读一致 |
 | HR-804 | DAC → J_SYNC 自检 | PA4 经跳线驱动 J_SYNC 共点：三路 ADC 看同一 DAC 斜坡，**不需要外部信号源**即可测同步、线性与偏斜 | 三路读同一斜坡偏差 ≤ 2 LSB；扫相位得偏斜 |
 | HR-805 | 注入组 / 规则组分工 | 三路电流走 **ADC1/2/3 注入组**，由 **TIM1_TRGO 同步触发**；单一 JEOS 中断一次性读三路 JDR1 并打同一 `RawSample3.tick`。VBUS/NTC/VREFINT 走**规则组 + DMA 慢扫** | 20 kHz 下电流点不丢；三路 `tick` 相同；慢通道 1 ms 更新 |
 | HR-806 | ADC 模拟看门狗 | AWD1/2/3 设过流与采样越限阈值，超限直接进硬件中断（不依赖软件残差）| 注入超限电流，中断命中且动作在下一周期内 |
@@ -301,9 +302,9 @@ V2 与 PCB14 的差别集中在模拟前端（为片内 OPAMP 让路）、6 路 
 | BOOT0 | PB8 | 61 | 已接 | BOOT0 | 沿用 + 10 kΩ 下拉 + 跳线 |
 | HSE | PF0 / PF1 | 5 / 6 | 已接 | OSC_IN/OUT | 沿用（16 MHz 或 24 MHz 均可，不影响 USB）|
 | STROBE1/2/3 | PC6 / PC7 / PC8 | 38 / 39 / 40 | **网表里无网络** | TIM8_CH1/2/3、HRTIM1_CHF1/CHF2/CHE1 | 新增引出（HR-501）|
-| DAC 遥测 | PA4 / PA5 | 18 / 19 | 空闲 | DAC1_OUT1/2 | 新增 TP17（HR-803），PA5 预留 |
+| DAC 遥测 | PA4 / PA5 | 18 / 19 | 空闲 | DAC1_OUT1/2 | V2 历史；最新 T-014：OUT1 残差 / OUT2 冻结（HR-803） |
 | COMP2_OUT | PA2 | 14 | 空闲 | COMP2_OUT | 新增 TP（HR-808）|
-| 状态 LED | PB2 | 26 | 空闲 | GPIO | 新增（HR-505）|
+| 状态 LED | PB2 | 26 | 空闲 | GPIO | V2 历史；最新网表无 MCU LED（HR-505）|
 | 母线分流（选装）| PA0 | 12 | 空闲 | ADC1_IN1/ADC2_IN1 | 预留（HR-210）|
 | 保持空置 | PA6、PB1 | 20 / 25 | — | OPAMP2_VOUT / OPAMP3_VOUT | 便于日后关掉 OPAMP 直接接 ADC |
 | 其他空闲 | PA15, PB11, PC12, PC13, PC14, PC15, PC1, PC2, PC3, PD2 | 51,33,54,2,3,4,9,10,11,55 | 空闲 | — | 留焊盘（HR-606）|
@@ -335,12 +336,12 @@ PWM_HS、BOOT0、SWD、HSE 与上表一致；下列行**覆盖上表**。
 | TIM1_BKIN | **未引出** | — | 网表无 `BKIN` 网络；`BKE` 必须为 0，硬件过压 break 缺口 |
 | 相电流 OPAMP 输入 | OPA1=SOC→**PA3**；OPA2=SOB→**PA7**；OPA3=SOA→**PB0** | 17/21/24 | **A/C 相与 OPAMP 通道交叉**；4.99 kΩ 偏置网络 |
 | VBUS_ADC | **PB11** | 33 | 原 V2 表的 PA3 不再使用 |
-| DAC1_OUT1 / OUT2 | PA4 / PA5 | 18/19 | TP1 / TP2；只连外部脚，不进内部采样链 |
-| USART3_TX / RX | PB6 / PB7 | 59/60 | 网表网络名为 USART3；`.ioc` 标为 USART1，AF 需核对 |
+| DAC1_OUT1 / OUT2 | PA4 / PA5 | 18/19 | TP1 残差 / TP2 冻结指示；只连外部脚，不进内部采样链（HR-803） |
+| TP_SYNC_LOOP / FREEZE | **PB6 / PB7** | 59/60 | 网表网络名仍为 USART3；本季**不启用 USART3**，配成推挽 GPIO（HR-510） |
 | FDCAN / USB | PA11 / PA12 | 45/46 | 网表为 `CAN_RX/TX`（FDCAN1）；**本板无 USB** |
 | ENC1_CS / ENC2_CS | PC12 / PC10 | 54/52 | 原 V2 表的 PB7/PB9 不适用 |
 | STROBE1/2/3 | **未引出** | — | 原 V2 表的 PC6/PC7/PC8 不适用；PC7/PC8 已改 nSLEEP/nFAULT |
-| 状态 LED | **无 MCU LED** | — | 网表只有电源指示 LED1；原 PB2 心跳不适用 |
+| 状态 LED | **无 MCU LED** | — | 网表只有电源指示 LED1；PB2 不驱动，状态走 RTT（HR-505） |
 | EXT_I_REF / COMP2_OUT / OPAMP4 | **未引出** | — | 最新网表没有这些网络 |
 | NTC | U1.11 / `ADC12_IN6` | 11 | 网表网络名；MCU 引脚名以封装表复核 |
 
@@ -365,16 +366,29 @@ RTT：`clock=ok`、`pwm=ok arr=4250 dtg=85 moe=false aoe=false bke=false`。
 
 - `SOA/SOB/SOC`（U9.15/16/17）经 4.99 kΩ 网络进 `OPA3/OPA2/OPA1`（PB0/PA7/PA3）；**A/C 交叉**。
 - 静态偏置约 1.65 V（VREF+/2）；HR-203 标度 0.2712 V/A、2.97 mA/LSB。
-- `DAC1_OUT1/2`（PA4/PA5，TP1/TP2）只到外部脚，只能作外部注入/基准。
+- `DAC1_OUT1/2`（PA4/PA5，TP1/TP2）只到外部脚；T-014 用 OUT1 输出残差、OUT2 作冻结指示（HR-803），不再作内部采样链。
 - 片内 OPAMP1/2/3 follower，输出内部到 ADC1/2/3；无 OPAMP4/COMP2_OUT。
+
+### 4.3 T-014：TP_SYNC / DAC / RTT 时间戳
+
+| 探针 | 位置 | 期望 |
+|---|---|---|
+| TP_SYNC_LOOP | PB6（59） | 20 kHz ISR 内高、退出低；bringup 自检只给短脉冲 |
+| TP_SYNC_FREEZE | PB7（60） | 冻结 50 ms 内高，随后低 |
+| DAC1_OUT1 | PA4（18）/ TP1 | 0 A = 1.65 V；自检回读 2048 |
+| DAC1_OUT2 | PA5（19）/ TP2 | 正常 0 V；冻结瞬间 3.3 V；自检回读 4095→0 |
+
+RTT 已见 `dwt=ok cycles=75`、`trace=freeze dac1=2048 dac2=4095`、`DATA,...`；
+**示波器/LA 物理波形尚未测**（192.168.1.77:5025 本会话不可达）。
 
 ## 5. 测试点与注入网络
 
 | TP | 网络 | 用途 |
 |---|---|---|
-| TP1 | DAC1_OUT1（PA4） | 外部模拟注入/基准 |
-| TP2 | DAC1_OUT2（PA5） | 外部模拟注入/基准 |
+| TP1 | DAC1_OUT1（PA4） | 残差 r_k 模拟输出；0 A≈1.65 V |
+| TP2 | DAC1_OUT2（PA5） | 冻结指示：0 V 正常 / 3.3 V 冻结 |
 | TP3 | 未分配 | 按实物确认 |
+| PB6/PB7 | TP_SYNC_LOOP/FREEZE | 推挽 GPIO；不再作 USART3 |
 
 `SOA/SOB/SOC` 测试脚：按丝印/通断确认是 U9.15/16/17（驱动侧）还是 OPA1/2/3（运放输入侧）。
 PCB14 的 TP5/6/7 是滤波后 ADC 侧，与最新板不是同一套，不能混用。

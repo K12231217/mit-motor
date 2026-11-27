@@ -7,7 +7,12 @@
 
 use std::process::Command;
 
-const TIER_B_PREFIXES: [&str; 4] = ["software/firmware/", "software/bsp/", "software/system/", "software/app/"];
+const TIER_B_PREFIXES: [&str; 4] = [
+    "software/firmware/",
+    "software/bsp/",
+    "software/system/",
+    "software/app/",
+];
 const HANDOFF: &str = ".scratch/handoff.md";
 const HIL_MARKER: &str = "HIL: PASS";
 
