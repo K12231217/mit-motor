@@ -227,7 +227,7 @@ pub const ENC_JUMP_MARGIN_LSB: u8 = 4;
 /// 依据：HR 的安全阶梯要求"故障锁存，清除需显式命令 + 无故障持续 T"，未给 T。取
 /// 0.5 s 的两条理由：比通信看门狗（`budget::CAN_TIMEOUT_MS = 20 ms`）长 25 倍，
 /// 通信抖动不会被当成"已经稳定"；又短于人工对命令生效的耐心（超过 1 s 会以为命令
-/// 丢了）。判据在 `user::fsm`，本常量只给时长。
+/// 丢了）。判据在 `crate::joint::service_fsm`，本常量只给时长。
 pub const FAULT_CLEAR_HOLD_US: u32 = 500_000;
 
 /// 零位标定的误差半宽，单位 LSB。

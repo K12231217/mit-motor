@@ -3,7 +3,7 @@
 //! 只放两类数：手册/需求文档直接给出的量，以及由它们**唯一推出**的时序约束。改任何
 //! 一条都会让电路或时序物理上不成立，所以每条都带来源，文件末尾用编译期断言把互相
 //! 矛盾钉成编译错误。门限、降额与容量预算不在这里：预算见
-//! [`crate::joint::config_budget`]，策略见 `user::policy`。
+//! [`crate::joint::config_budget`]，策略见 `algorithms::motor::config_policy`。
 
 use crate::joint::config_budget::ISR_PERIOD_US;
 
@@ -103,7 +103,7 @@ pub const ENC_COUNTS_PER_REV: u16 = 1 << ENC_ANGLE_BITS;
 /// MT6701 SPI 时钟上限，单位 Hz：`t_CLK ≥ 64 ns` ⇒ 15.625 MHz。
 ///
 /// 这是器件侧上限。实际分频选择（PCLK/16 = 10.625 MHz）是策略，见
-/// `user::policy::ENC_SPI_HZ`。
+/// `algorithms::motor::config_policy::ENC_SPI_HZ`。
 pub const ENC_SPI_MAX_HZ: u32 = 1_000_000_000 / 64;
 
 /// Flash bank 2 起始地址，单位 字节。

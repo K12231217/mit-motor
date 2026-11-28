@@ -4,9 +4,9 @@
 //! （AGENTS §1.1 MECH-01/03）。本 crate 是 `unsafe` 白名单；其余 crate 保持
 //! `forbid(unsafe_code)`。
 //!
-//! T-011 冻结类型；T-012 已实现 `service_clock`（170 MHz 配置/读回）与 `bus_pwm`
-//! （TIM1 20 kHz/500 ns/BKIN/安全使能）；`bus_adc`/`bus_encoder`/`service_dwt` 仍
-//! 是 `todo!()`。`software/firmware/src/bin/main.rs` 已接入 clock/pwm，但不调用 `enable`。
+//! `service_clock`、`bus_pwm`、`bus_adc`、`service_dwt`、`service_timebase`、
+//! `service_trace` 已实现；`bus_encoder` 与 `init()` 仍是 `todo!()`。
+//! `software/firmware/src/bin/main.rs` 目前手工按序装配这些驱动，不调用 `init()`。
 
 #![no_std]
 #![deny(clippy::unwrap_used, clippy::expect_used)]

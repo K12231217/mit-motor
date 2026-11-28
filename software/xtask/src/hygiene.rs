@@ -143,12 +143,20 @@ fn check_comment_markers() -> CheckResult {
                     ));
                 }
             }
+            if text.contains("user::") {
+                hits.push(locate(
+                    &path,
+                    idx,
+                    raw,
+                    "旧 crate 名 `user::`：已改名 contracts / algorithms",
+                ));
+            }
         }
     }
 
     if hits.is_empty() {
         Ok(format!(
-            "{scanned} 个文件：注释无历史/流程词、无块注释、无分隔线"
+            "{scanned} 个文件：注释无旧 crate 名、无历史/流程词、无块注释、无分隔线"
         ))
     } else {
         Err((
@@ -387,9 +395,20 @@ fn path_covered(file: &str, prefix: &str) -> bool {
     }
 }
 
-/// crate 根、模块树 `mod.rs` 与 bin 入口是公共头，不是模块目录。
+/// `src/bin/` 下不参与 `<crate>/src/<domain>/<role>` 投影的文件：bin 入口与 bin 内子模块
+/// 的路径形状由 cargo 决定，不是模块 ID 的机械投影。逐条列出，新增必须显式加行并登记
+/// 模块 ID；不许再按前缀整片豁免。
+const BIN_FILES: [&str; 2] = [
+    "software/firmware/src/bin/main.rs",
+    "software/firmware/src/bin/trace/mod.rs",
+];
+
+/// crate 根、模块树 `mod.rs` 与 `BIN_FILES` 是公共头，不是模块目录。
 fn is_module_tree_file(path: &str) -> bool {
-    path.ends_with("/src/lib.rs") || path.ends_with("/mod.rs") || path.contains("/src/bin/")
+    if path.contains("/src/bin/") {
+        return BIN_FILES.contains(&path);
+    }
+    path.ends_with("/src/lib.rs") || path.ends_with("/mod.rs")
 }
 
 fn path_matches_id(path: &str, id: &str) -> bool {

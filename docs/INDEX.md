@@ -31,6 +31,7 @@
 | [`software-architecture.md`](software-architecture.md) | 文件/模块边界、模块注册表、不变量 I1–I7、门禁落点 |
 | [`instrumentation.md`](instrumentation.md) | TP_SYNC/DAC、TIM5/DWT、defmt 过滤、DATA 行与录波容量 |
 | [`motor-wk4310h.md`](motor-wk4310h.md) | WK4310H 铭牌、极对、每相/磁链换算 |
+| [`architecture/governance.md`](architecture/governance.md) | 架构降熵治理：六张清单、12 域体检、轮次日志与待确认；**冷数据，不冷启动** |
 | [`archive/`](archive/) | 历史 ADR 全文、研究/任务书、旧 HIL 表；**不冷启动** |
 
 ## 3. ADR 索引

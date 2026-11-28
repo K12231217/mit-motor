@@ -62,13 +62,13 @@ H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一�
 | `bsp.motor.service_clock` | `software/bsp/src/motor/service_clock.rs` | `init` | HSE 16M/PLL 170M 配置与读回；不匹配进 fault |
 | `bsp.motor.bus_pwm` | `software/bsp/src/motor/bus_pwm.rs` | `current @8` | TIM1 20 kHz/500 ns；无 BKIN（BKE=0）；enable 检查 nFAULT |
 | `bsp.motor.bus_adc` | `software/bsp/src/motor/bus_adc.rs` | `current @8` | ADC1/2/3 注入组 + TIM1_TRGO2；低边窗口由 MOE+CCxNE 实时判定 |
-| `bsp.motor.bus_encoder` | `software/bsp/src/motor/bus_encoder.rs` | `current @8` | SPI1/主编码器唯一所有者；只搬字节 |
+| `bsp.motor.bus_encoder` | `software/bsp/src/motor/bus_encoder.rs` | `current @8` | SPI1 总线唯一所有者；只搬字节，不判帧 |
 | `bsp.motor.service_dwt` | `software/bsp/src/motor/service_dwt.rs` | `current @8` | DWT CYCCNT；先开 DCB.TRCENA，再使能计数器 |
 | `bsp.motor.service_timebase` | `software/bsp/src/motor/service_timebase.rs` | `init` | TIM5 1 MHz，defmt 时间戳；32 位回绕 |
 | `bsp.motor.service_trace` | `software/bsp/src/motor/service_trace.rs` | `current @8` | PB6/PB7 TP_SYNC、DAC1 残差/冻结；无锁无日志 |
 | `bsp.joint.service_board` | `software/bsp/src/lib.rs` | `init` | Board 单实例；构造后 move 移交 |
 | `lib.motor.service_gate` | `software/algorithms/src/motor/service_gate` | `calib @2` | GainGate 唯一写者；组窗不写主窗 |
-| `lib.motor.service_encoder` | `software/algorithms/src/motor/service_encoder` | `current @8` | SPI1 唯一所有者；帧判据纯函数 |
+| `lib.motor.service_encoder` | `software/algorithms/src/motor/service_encoder` | `current @8` | MT6701 帧判据纯函数；不持有 SPI1 总线 |
 | `lib.joint.service_fsm` | `software/algorithms/src/joint/service_fsm` | `app state owner` | 迁移矩阵唯一实现 |
 | `lib.motor.config_motor` | `software/algorithms/src/motor/config_motor.rs` | `lib` | WK4310H 铭牌参数；每相/磁链换算 |
 | `lib.motor.config_policy` | `software/algorithms/src/motor/config_policy.rs` | `lib` | 策略阈值唯一来源；不复制 contracts |
@@ -81,6 +81,7 @@ H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一�
 | `lib.motor.service_math` | `software/algorithms/src/motor/service_math.rs` | `lib` | 无 libm 数值；纯函数 |
 | `lib.joint.service_user` | `software/algorithms/src/lib.rs` | `lib` | crate 根与 re-export；无状态 |
 | `app.motor.task_bringup` | `software/firmware/src/bin/main.rs` | `bringup` | S0 探针；单 Board owner；无电机输出 |
+| `app.motor.service_trace` | `software/firmware/src/bin/trace/mod.rs` | `current @8` | 20 kHz 预/后触发录波环；原子槽单写者，锁存后只读 |
 <!-- module-registry:end -->
 
 ## 2. 工作区与文件树

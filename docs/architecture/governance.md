@@ -1,0 +1,176 @@
+# 架构降熵治理 — 轮次日志与清单
+
+> 流程：`/arch-entropy-governance`。本文件是冷数据（不是控制文件）；控制文件仍是
+> `AGENTS.md`(RULES) / `docs/INDEX.md`(SPEC) / `.scratch/handoff.md`(STATE)。
+> 所有条目以 `文件:行` 取证；追不到的一律标 `UNVERIFIED`。
+>
+> 轮次 0 = 只读建图（本文件）。轮次 1 及以后在此追加，格式见文末模板。
+
+## 轮次 0：建图（只读）
+
+- 日期：2026-11-28
+- 范围：`D:/STM32_LQY/Rust/mit-motor` 全仓
+- 树状态：`main` @ `5b4485f`；工作区干净（仅本文件新增）
+- 门禁现状：`cargo xtask test` PASS（host 136 个 `#[test]`，`grep -c '#\[test\]'`），
+  `cargo xtask check` PASS。`bsp` / `firmware` 无 host 测试（`grep '#\[test\]' software/bsp/src` 为空）。
+
+### 1. 架构地图
+
+| crate / 层 | 路径 | 职责 | 公开接口（入口） | 所有者 | 状态 |
+|---|---|---|---|---|---|
+| `contracts` / `lib` | `software/contracts/src` | 接口事实唯一来源：线协议、状态字、快照、设备常量 | `lib.rs` re-export；`joint::*`、`motor::*` | `lib` | 全实现，44 个 host 测试 |
+| `algorithms` / `lib` | `software/algorithms/src` | 纯算法、可 host 测；依赖仅 `contracts` | `joint::{service_fsm,service_supervisor}`、`motor::{chain_*,service_*}` | 见 §3 | 全实现，92 个 host 测试 |
+| `bsp` / `bsp` | `software/bsp/src` | 唯一 `unsafe` 层；外设配置与所有权 | `Board`、`motor::{bus_pwm,bus_adc,bus_encoder,service_clock,service_dwt,service_timebase,service_trace}` | 见 §3 | clock/pwm/adc/dwt/timebase/trace 已实现；`bus_encoder` 与 `Board::init` 为 `todo!()` |
+| `firmware` / `app` | `software/firmware/src` | S0/电流环 bring-up 装配（独立 workspace，单 bin） | `bin/main.rs`（RTIC app）、`bin/trace/mod.rs`（录波环） | `bringup`/`current`/`monitor` | 已 HIL（T-015）；**不是最终 `app` 层** |
+| `xtask` / 工具 | `software/xtask/src` | 门禁唯一入口（check/test/fmt/clippy/rel/size/arch/doc/hygiene/tier） | `main.rs` 子命令分发 | host 工具 | 无测试；`arch` 只实现 I1/I2/I3/I7 |
+
+未建：`software/system`、`software/app`（`docs/software-architecture.md` §2 目标位）。按
+`AGENTS.md` §2，`system`/`app` 未建时不得把相关检查报成 PASS。
+
+### 2. 依赖图
+
+```
+contracts ──┬──> algorithms ──┐
+            └──> bsp ─────────┤
+                               ├──> firmware (bin, RTIC + embassy-stm32)
+xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-monotonics
+```
+
+| 源 → 目标 | 类型 | 循环 | 允许性 | 证据 |
+|---|---|---|---|---|
+| `algorithms → contracts` | 编译 | 否 | 允许（I1） | `software/algorithms/Cargo.toml:15` |
+| `bsp → contracts` | 编译 | 否 | 允许（I1 未检查 bsp） | `software/bsp/Cargo.toml:19` |
+| `firmware → {bsp, algorithms, contracts}` | 编译 | 否 | 允许（装配层） | `software/firmware/Cargo.toml:60-77` |
+| `firmware → embassy-stm32::pac`（直接改 RCC/GPIOB/TIM1 SR） | 调用 | 否 | **偏离**：app 层直接碰寄存器 | `software/firmware/src/bin/main.rs:30,79-84,294` |
+
+- I1 只对 `algorithms` 跑 `cargo tree`（`software/xtask/src/checks.rs:74-118`），`bsp` 的依赖方向无检查。
+- 根 workspace 只含 `contracts`+`algorithms`（`Cargo.toml:16-19`），`cargo test --workspace` 不编译 `bsp`/`firmware`。
+
+### 3. 状态所有权地图
+
+| 状态 | 声明写者（注册表） | 实际写者 | 读者 | 同步 | 证据 |
+|---|---|---|---|---|---|
+| TIM1 寄存器 / `nSLEEP` / `nFAULT` | `current @8` | **`bringup @1`** | `monitor @1`（`state()` 只读） | RTIC `Local` 独占所有权 | 声明 `docs/software-architecture.md:66`；实际 `main.rs:79-80,274` |
+| ADC1/2/3 注入组 + OPAMP | `current @8` | `current @8` | 同左 | RTIC `Local` | 一致（`main.rs:62,291`） |
+| `GainGate` | `calib @2` | **`current @8`** | 同左 | RTIC `Local` | 声明 `docs/software-architecture.md:71`；实际 `main.rs:62,296` |
+| `TraceRecorder`（32 KiB 环） | `current @8` | `current @8` 写、`monitor @1` 导出 | 两任务 | `pub static` + 全 `AtomicU32`，单写者 | `trace/mod.rs:253`、`main.rs:311,360` |
+| `ISR_COUNT` / `ISR_CYCLES` / `ADC_ERRORS` | 未注册 | `current @8` | `monitor @1` | `static AtomicU32` | `main.rs:46-48,293-294,347` |
+| `DWT` / `Timebase` | `current @8` / `init` | `current @8` / `init` | 同左 | 独占 / defmt 时间戳 | 一致 |
+| `Snapshot` / `Cmd`/`Event` 队列 | `lib` | 无运行期写者（app 未建） | 无 | 类型级 seqlock/队列 | `contracts/src/joint/protocol_snapshot.rs`、`protocol_events.rs`；**无集成证据** |
+
+> 结论：注册表 owner 列有 3 处与代码不符（TIM1、GainGate、编码器边界），且
+> H6 只校验 owner 非空（`hygiene.rs:348-356`），不校验真实性。
+
+### 4. 重复实现清单
+
+| 语义 | 实现 A | 实现 B | 差异 | 保留 | 证据 |
+|---|---|---|---|---|---|
+| SPI1 唯一所有者 | `bsp.motor.bus_encoder` "SPI1/主编码器唯一所有者；只搬字节" | `lib.motor.service_encoder` "SPI1 唯一所有者；帧判据纯函数" | 两行同时声称"唯一所有者"，物理上互斥 | 按层拆分：bsp 拥有总线字节搬运，algorithms 拥有帧判据与状态 | `docs/software-architecture.md:65,71` |
+| 整机装配 | `bsp::Board::init()`（`todo!()`） | `main.rs` 手工按序装配 clock→trace→pwm→adc | 两条装配路径，只有一条可运行；`Board` 无人调用 | 删除未用的 `Board`/`init`，或让 main 改用它（二选一，见 TASKS） | `bsp/src/lib.rs:24-41`、`main.rs:100-260` |
+| 器件数值事实 | `contracts/src/motor/config_hw.rs`（唯一真源） | `docs/INDEX.md` §1 复写 170 MHz / ARR=4250 / 500 ns / 0.2712 V·A⁻¹ / 2.25 mA/LSB | 违反 PRE-07"文档只引编号不复写数值"；改常量不会让文档编译失败 | 文档只留指针 | `docs/INDEX.md:13,15,16` |
+| "0 A = 2048" DAC 零点 | `service_trace.rs:20`（`DAC_MID_CODE = 0x0800`） | 注释复写：`service_trace.rs:6,109`、`main.rs:43`、`trace/mod.rs` 隐含 | 无代码重复，仅注释三处 | 可接受，低危 | 同左 |
+| 失败表达 | `Adc::init/take_sample → Option` | `Pwm::wake/enable → Result<(), PwmFault>`；`Board::init → 不可失败签名`；main 里 `loop { spin }` 故障码 | 三套语义并存 | 统一为"构造点 `Result`，热路径 `Option`/内联判定" | `bus_adc.rs:76,120`、`bus_pwm.rs:193,219`、`main.rs:118-123` |
+
+证伪记录（怀疑但**未**成立）：`AMPS_PER_LSB` 是 `config_hw::SOX_AMPS_PER_LSB` 的再导出
+（`bus_adc.rs:15,26`），非第二份数值；`sqrt_f32` 只有一个实现（`service_math.rs:19`），
+`service_gate/math.rs` 只留常量与 `powi`。
+
+### 5. 技术方案并存
+
+| 领域 | 并存方案 | 范围 | 收敛结论 |
+|---|---|---|---|
+| 运行时 | RTIC 2.4 + embassy-stm32 0.1 混合（ADR-02） | 全局唯一 | 保持；单点风险是 embassy PAC 与 G474 编码不一致（已两次踩坑，见 handoff §3） |
+| 时钟 | `service_clock::config()` 里的 PLL 参数 vs `config_budget::SYS_CLK_HZ` | 配置点 / 常量 | 已用 `const _: () = assert!` 连接（`service_clock.rs:17`），可接受 |
+| `no_std` 策略 | `contracts` 恒 `no_std`；`algorithms` 仅非 test 启用；`bsp`/`firmware` 恒 `no_std` | 按"能否 host 测"分 | 两类理由成立，保持 |
+| 跨优先级通道 | 宪法只认 `Snapshot` + 有界队列；实际还有 `TRACE` 静态原子环 + 3 个 `AtomicU32` 诊断计数 | 诊断 vs 控制 | 需在 PRE-04 明确"诊断通道"例外，或纳入快照（见 TASKS R4） |
+| crate 命名 | 现行 `algorithms`/`contracts`；注释仍引用旧名 `user::` | 8 处注释 | 全部改掉，并加 grep 门禁（见 R1） |
+| 失败上报 | `defmt::error!` + 死循环故障码（`TP2/PB7` 常高） vs 计划中的 fault dump/状态字 | 现为探针 | 迁移到 `app/joint/service_fault.rs` 时才统一；当前不得报"已验证"以外的结论 |
+
+### 6. 规范偏离清单
+
+| 规则 | 期望 | 实际 | 证据 | 可否机器强制 |
+|---|---|---|---|---|
+| PRE-07 数值唯一来源 | 文档只引编号 | INDEX §1 复写 5 个常量 | `docs/INDEX.md:13,15,16` | 可（`doc_check` 未落地） |
+| PRE-04 两种交叉通道 | 仅 Snapshot/队列 | `TRACE` 静态环 + 控制台计数 | `trace/mod.rs:253`、`main.rs:46-48` | 部分（可白名单） |
+| MECH-01 驱动不设全局 static | 无 `static` 驱动 | `pub static TRACE`（数据环，非驱动对象） | `trace/mod.rs:253` | 可（区分驱动/数据） |
+| PRE-05 配置期断言 | 器件事实用 `const _: () = assert!` | `deadtime_dtg()` 在运行期调用点执行 `assert!` | `bus_pwm.rs:291-294`，调用 `:149` | 可（`const DTG` 化） |
+| MECH-05 注册表 owner 真实 | owner = 唯一实际写者 | TIM1→`bringup`、GainGate→`current`、编码器双声明 | `docs/software-architecture.md:66,71,65` vs `main.rs:79,291` | 难（需静态分析）；当前 H6 只查非空 |
+| H6 文件覆盖 | 每个源码文件恰好被一个模块覆盖 | `/mod.rs` 与 `/src/bin/` 一律豁免，且可匹配**任意** ID | `hygiene.rs:393-405`（`is_module_tree_file` 短路返回 true） | 可（收紧规则） |
+| 不变量清单 | 架构文档 I1–I6；AGENTS 说 arch 实现 I1/I2/I3 | 代码实现 I1/I2/I3/**I7**；doc 无 I7 | `checks.rs:29-70`、`docs/software-architecture.md` §1 | 可（补 I7 定义） |
+| 模块/命名 | `algorithms`/`contracts` | 注释引用旧 crate `user::` 共 8 处 | `bus_encoder.rs:3`、`protocol_fsm.rs:3,10,49`、`service_supervisor.rs:5`、`config_policy.rs:230`、`config_hw.rs:6,106` | 可（grep 门禁） |
+| 文档状态 | 只写当前事实 | `bsp/src/lib.rs:9` 仍称 `bus_adc`/`service_dwt` 是 `todo!()`（已实现） | 同左 | 可（人工，或由 H6 绑定状态字段） |
+
+### 7. Phase 1：12 域分级
+
+| 域 | 结论 | 依据 |
+|---|---|---|
+| UI / 设计系统 | N/A | 无 UI |
+| 领域模型 | 合规 | `contracts` 单点定义物理量/定点/帧；编译期 `size_of`/`offset_of` 断言 |
+| API 契约 | 合规 | 线协议唯一在 `protocol_icd/wire`；`ICD_VERSION` 常量 + 测试 |
+| 状态与数据流 | 偏离 | 注册表 owner 3 处不符；诊断通道未入宪法 |
+| 数据访问与缓存 | 部分缺失 | `CalibRecord`/flash 接口未定（INDEX §4 待裁决）；缓存无实现 |
+| 配置 | 合规 | `config_hw`/`config_budget`/`config_policy` 三层分工 + 编译期自洽断言 |
+| 错误处理与重试 | 偏离 | 三套失败语义（§4）；运行期 `assert!` |
+| 日志与可观测性 | 偏离 | 无统一 `system/log.rs`；RTT 直出 + 静态计数器；计划位未建 |
+| 权限与认证 | N/A | 单机固件 |
+| 命名与模块边界 | 偏离 | `user::` 残留；H6 对 `mod.rs`/`bin` 失效；app 直碰 PAC |
+| 公共基础设施 | 合规 | `service_math` 单点原语；`xtask` 单入口 |
+| 测试与工具链 | 偏离 | bsp/firmware 零 host 测试（允许，但 HIL 是唯一证据）；I4–I6 无检查；`system`/`app`/`replay` 未落地却被文档引用（AGENTS §2 已禁止） |
+
+### 8. 待执行（按总复杂度排序，详见下一轮）
+
+| ID | 主题 | 级别 | 方案 | 默认选择 |
+|---|---|---|---|---|
+| R1 | 文档/注册表/命名纠偏（8 处 `user::`、3 处 owner、SPI1 双声明、lib.rs 陈旧状态） | A（免 HIL） | (a) 改文档随代码 + 补 grep 门禁；(b) 改代码随文档（Tier B） | (a) |
+| R2 | PRE-07 文档数值收敛 | A | (a) INDEX §1 换指针；(b) 落地 `doc_check` 比对常量；(c) 记为例外 | (a)+(c) |
+| R3 | `Board::init` vs `main.rs` 双装配 | B（Tier B） | (a) 删 `Board`/`init` 脚手架；(b) 实现并让 main 用它 | (a)（当前无人调用） |
+| R4 | 诊断通道入宪法 | A | (a) PRE-04 增"诊断通道"例外并写 ADR；(b) 改为 `Snapshot` | (a) |
+| R5 | H6 覆盖收紧（`mod.rs`/`bin` 不豁免） | A | (a) 要求 `bin/*/mod.rs` 也有注册项；(b) 只豁免 `src/**/mod.rs`，`bin` 例外单独列 | (a) |
+
+### 9. 待确认（人）
+
+1. R3：是否现在删除未使用的 `Board`/`init`？`main.rs` 正在使用中，删 `Board` 不影响它。
+   **本轮：用户选 `hold`，不动。**
+2. R5：`firmware/src/bin/trace/mod.rs`（254 行，含 32 KiB 环）应登记为 `app.*.service_trace` 还是等 `system/trace.rs` 落地再迁移。
+   **本轮：用户选 `narrow`，已登记 `app.motor.service_trace` 并把整片前缀豁免改成显式 `BIN_FILES` 白名单。**
+3. R1 的 owner 修正方向：以"代码现状"为准（bringup 持有 PWM、current 持有 GainGate），还是以"目标架构"为准（current 持有 PWM、calib 持有 GainGate）并排期迁移。
+   **未决。** 本轮只做了无争议的事实纠偏（旧 crate 名、SPI1 双声明、陈旧状态行），owner 行未动。
+
+---
+
+## 轮次 1：命名与注册表事实纠偏
+
+- 熵源：§6 第 1/5/6/8/9 行，§4 第 1 行
+- 调用方核实：`grep -rn 'user::' software --include=*.rs` = 8 处 / 5 文件；`grep -rn 'service_encoder\|bus_encoder' docs/software-architecture.md` = 2 行冲突
+- 选定方案：文档随代码（1 行事实替换），不做代码迁移
+  - `bus_encoder.rs:3` → `algorithms::motor::service_encoder`
+  - `config_hw.rs:6,106` → `algorithms::motor::config_policy[::ENC_SPI_HZ]`
+  - `protocol_fsm.rs:3,10,49` → `algorithms::joint::service_fsm[::step]`
+  - `service_supervisor.rs:5`、`config_policy.rs:230` → `crate::joint::service_fsm`
+  - 注册表：SPI1 拆成"bsp 拥有总线 / algorithms 拥有判据"；新增 `app.motor.service_trace`
+  - `bsp/src/lib.rs:7-9` 状态行改为当前事实
+- 放弃方案：把 PWM/GainGate 写者改成注册表声明（Tier B，需 HIL，且与 `main.rs` 现有任务划分冲突）
+- 迁移完成：8/8 注释；2/2 注册表 contract；1 个新注册项
+- 删除的旧实现：无（只改措辞与检查规则）
+- 防回归约束：
+  - H5 新增 `user::` 命中即 FAIL（`software/xtask/src/hygiene.rs:146-153`）
+  - H6 的 `/src/bin/` 前缀豁免改为显式 `BIN_FILES` 白名单（`hygiene.rs:398-412`）；新增 bin 子模块必须先登记
+- 验证：`cargo xtask hygiene` PASS（H2/H4/H5/H6）；`cargo xtask doc` PASS；`cargo xtask test` PASS
+- 未决项：R1 owner 方向（§9-3）；R2 文档数值收敛；R4 诊断通道
+
+---
+
+## 轮次记录模板（下一轮起复制）
+
+```md
+## 轮次 N：<主题>
+- 熵源：<本文件清单条目>
+- 调用方核实：<数量、路径>
+- 选定方案 / 放弃方案：
+- 行为基线：<测试或观测证据>
+- 迁移完成：<调用方清单>
+- 删除的旧实现：<路径>
+- 防回归约束：<lint / 类型 / 契约测试 / xtask 检查>
+- 验证：PASS/FAIL + 命令与输出摘要
+- 未决项：
+```

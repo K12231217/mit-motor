@@ -1,13 +1,13 @@
 //! 电机状态机的类型：只放数据，不放规则。
 //!
-//! 迁移规则是策略，实现与全表穷举在 `user::fsm`；本模块只固定"有哪些状态、有哪些
+//! 迁移规则是策略，实现与全表穷举在 `algorithms::joint::service_fsm`；本模块只固定"有哪些状态、有哪些
 //! 事件、拒绝原因怎么编号"，因为它们跨 crate 传递并进日志与遥测。
 //!
 //! # 与线上契约的关系
 //!
 //! 当前状态不进状态字：状态字已有模式（bit0–3）、标定状态（bit4–6）、故障码（bit16–23），
 //! 三者合起来能重建 [`MotorState`] 的粗粒度投影。额外的"标定档案是否有效"是上电从
-//! bank 2 加载的**事实**，不是状态，因此作为 `user::fsm::step` 的参数而不是变体——否则
+//! bank 2 加载的**事实**，不是状态，因此作为 `algorithms::joint::service_fsm::step` 的参数而不是变体——否则
 //! `Idle` 与"是否已标定"会各存一份，两处可以互相矛盾。
 
 use crate::joint::protocol_events::Cmd;
@@ -46,7 +46,7 @@ pub enum MotorState {
 ///
 /// `Calibrating(C0Zero)` 与 `Calibrating(C6Freeze)` 必须配 [`Self::Coast`]：C0 要测零位、
 /// C6 已冻结，两处开波都会污染零位或破坏冻结结果。C1–C5 才允许 [`Self::OpenLoop`]。
-/// 映射由 `user::fsm` 的 `calib_step_action` 单点实现，调用方不得自行用 `match` 决定。
+/// 映射由 `algorithms::joint::service_fsm` 的 `calib_step_action` 单点实现，调用方不得自行用 `match` 决定。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoopAction {
     /// 六路输入全低，高阻。
