@@ -201,30 +201,31 @@ software/firmware/               # 现有固件（独立 workspace，单 bin mai
 
 ### 3.1 `snapshot.rs` —— 快环↔慢环的唯一通道
 
-两个方向各一个 `Snapshot<T>`，**只有一个写者**，方向由优先级决定：
+三个视图共用一份 `Snapshot<V, N>` 槽（下行 N=16，上行拆成 Cmd N=6 与 Gain N=8 以保住单写者），
+**只有一个写者**，方向由优先级决定：
 
 | 方向 | 写者 | 读者 | 读者代价 |
 |---|---|---|---|
 | 下行（电流环 → 慢环）| `current_loop` @8 | can/calib/io @1–5 | 被写者抢占 → seq 重试，最多 4 次 |
 | 上行（慢环 → 电流环）| `calib`/`can` @2–5 | `current_loop` @8 | 写者被抢占 → 读失败，用上一拍设定值 |
 
-协议（`T` 按 `[AtomicU32; 16]` 存储，**全程安全代码**，因此 `contracts` 能保持 `forbid(unsafe_code)`）：
+协议（`V` 按 `[AtomicU32; N]` 存储，**全程安全代码**，因此 `contracts` 能保持 `forbid(unsafe_code)`）：
 
 ```rust
-pub struct Snapshot { seq: AtomicU32, w: [AtomicU32; 16] }   // 64 B payload
+pub struct Snapshot<V, const N: usize> { seq: AtomicU32, w: [AtomicU32; N], _view: PhantomData<V> }
 
 // 写：odd 表示"正在写"。Release 保证 payload 写入不会被排到末尾的 seq 之后
 seq.store(odd,  Ordering::Release);            // 1
-for (i, word) in v.encode().iter().enumerate() { w[i].store(*word, Ordering::Relaxed); }
+for (dst, word) in w.iter().zip(v.to_words().iter()) { dst.store(*word, Ordering::Relaxed); }
 seq.store(even, Ordering::Release);            // 2
 
 // 读：有界重试，绝不等待。Acquire 保证 payload 读取不会被提到开头的 seq 之前
-for _ in 0..4 {
+for _ in 0..SNAPSHOT_RETRY_MAX {
     let s0 = seq.load(Ordering::Acquire);
     if s0 & 1 != 0 { continue; }
-    let mut buf = [0u32; 16];
-    for (i, word) in buf.iter_mut().enumerate() { *word = w[i].load(Ordering::Relaxed); }
-    if seq.load(Ordering::Acquire) == s0 { return Some(FastView::decode(&buf)); }
+    let mut buf = [0u32; N];
+    for (dst, src) in buf.iter_mut().zip(w.iter()) { *dst = src.load(Ordering::Relaxed); }
+    if seq.load(Ordering::Acquire) == s0 { return Some(V::from_words(&buf)); }
 }
 None
 ```

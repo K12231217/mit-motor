@@ -70,6 +70,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | 器件数值事实 | `contracts/src/motor/config_hw.rs`（唯一真源） | `docs/INDEX.md` §1 复写 170 MHz / ARR=4250 / 500 ns / 0.2712 V·A⁻¹ / 2.25 mA/LSB | 违反 PRE-07"文档只引编号不复写数值"；改常量不会让文档编译失败 | 文档只留指针 | `docs/INDEX.md:13,15,16` |
 | "0 A = 2048" DAC 零点 | `service_trace.rs:20`（`DAC_MID_CODE = 0x0800`） | 注释复写：`service_trace.rs:6,109`、`main.rs:43`、`trace/mod.rs` 隐含 | 无代码重复，仅注释三处 | 可接受，低危 | 同左 |
 | 失败表达 | `Adc::init/take_sample → Option` | `Pwm::wake/enable → Result<(), PwmFault>`；`Board::init → 不可失败签名`；main 里 `loop { spin }` 故障码 | 三套语义并存 | 统一为"构造点 `Result`，热路径 `Option`/内联判定" | `bus_adc.rs:76,120`、`bus_pwm.rs:193,219`、`main.rs:118-123` |
+| seqlock 发布序列 | `FastSnapshot::write` | `CmdSnapshot::write` / `GainSnapshot::write` | 三份逐字相同的 `seq` 置奇→payload→置偶；只有 decode 目标不同 | 私有 `Snapshot<V, N>` 一份 + 三个薄包装（轮次 6 已合并） | 轮次 5 前 `protocol_snapshot.rs` 三处 `write` |
 
 证伪记录（怀疑但**未**成立）：`AMPS_PER_LSB` 是 `config_hw::SOX_AMPS_PER_LSB` 的再导出
 （`bus_adc.rs:15,26`），非第二份数值；`sqrt_f32` 只有一个实现（`service_math.rs:19`），
@@ -134,7 +135,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R11 | firmware/bsp 注释级纠偏（`TRACE_FLAG_SELFTEST` 悬空 link、`bus_pwm.rs:101` 的 PB10 措辞） | B（Tier B，注释级） | (a) 与 R8/R9 同批做，一次 HIL 签收；(b) 单独做并标 `PENDING_HIL` | (a) |
 | R12 | `bsp` 的 fmt/clippy 覆盖（thumb crate，当前无人检查） | A | (a) 以 `CARGO_BUILD_TARGET=thumbv7em-none-eabihf --manifest-path software/bsp/Cargo.toml` 跑；(b) 让 firmware 的 `-p bsp` 生效需先并入同一 workspace（会破坏独立 workspace 约定） | (a) 评估构建副作用 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5）；R3 hold（§9-1）；R4/R7–R12 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5）；seqlock 归一完成（轮次 6）；R3 hold（§9-1）；R4/R7–R12 待做。
 
 ### 9. 待确认（人）
 
@@ -249,6 +250,24 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：`fmt-check`/`clippy` 现在覆盖 `software/xtask` 本身；工具里的格式/lint 退化会直接 FAIL。
 - 验证：`fmt-check`/`clippy`/`arch`/`hygiene`/`test`/`doc` 全 PASS（提交回执）。
 - 未决项：`bsp` 的 fmt/clippy 覆盖（R12）；门禁命令仍无自测（`xtask` 零测试）。
+
+---
+
+## 轮次 6：seqlock 协议只实现一次
+
+- 熵源：§4「seqlock 发布序列」行；§3.1 文档与代码不一致
+- 调用方核实：
+  - `protocol_snapshot.rs` 里 `FastSnapshot::write`、`CmdSnapshot::write`、`GainSnapshot::write` 函数体逐字相同；三个 `empty()` 同形；`read_once/read_retry` 只差 `decode` 目标（读核心 `read_words` 早已共享）。
+  - 公开调用方：当前为零（`system`/`app` 未建），改动只影响 contracts 自己的测试。
+  - `docs/software-architecture.md` §3.1 写"两个方向各一个 `Snapshot<T>`"，实际是三个视图（上行拆 Cmd/Gain 保单写者）。
+- 选定方案：私有 `Snapshot<V, const N: usize>` + `ViewWords<N>` trait；公开类型收敛为三个薄包装，各自保留"谁能重试"的 API 约束；补三条 `size_of` 断言钉死槽大小。
+- 放弃方案：把 `CmdSnapshot` 直接别名成 `Snapshot<CmdView, CMD_WORDS>` —— 会让上行方向意外获得 `read_retry`，与"该方向重试必然拿到同一个 `None`"的既有论证冲突。
+- 行为基线：改前 `cargo test -p contracts` 44 PASS；改后仍 44 PASS，golden words（`golden_words_pin_each_view_field`）未变 ⇒ 线格式与 word 布局不变。
+- 迁移完成：三个快照类型、6 个 seqlock 测试用例的字段访问（`snap.0.seq`）。
+- 删除的旧实现：两份 `write` 副本、两份 `empty` 副本、三处 `read_words` 调用样板。
+- 防回归约束：`size_of::<{Fast,Cmd,Gain}Snapshot>() == 4 + 4·N` 三条编译期断言；44 个 host 测试（含 odd-seq/重试上限/不撕裂）。
+- 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
+- 未决项：无（`Snapshot` 的 M4 内存序论证仍只在注释里，需 LA 实测才能说"已验证"）。
 
 ---
 

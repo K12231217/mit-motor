@@ -27,6 +27,7 @@
 //! 最坏 4 ×（读 `seq` + 16 word 拷贝 + 读 `seq`）≈ 80 cycles ≈ 0.47 µs @170 MHz，
 //! 已计入 25 µs 的 ISR 预算。
 
+use core::marker::PhantomData;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::joint::config_budget;
@@ -276,32 +277,99 @@ fn read_words<const N: usize>(
     (None, attempts)
 }
 
-/// 下行 seqlock：快环（prio 8）单写，慢环（prio 1–5）多读。
-#[derive(Debug)]
-pub struct FastSnapshot {
-    seq: AtomicU32,
-    w: [AtomicU32; FAST_WORDS],
+/// 视图与其 word 布局的编译期契约；只有本模块的三个视图实现它。
+trait ViewWords<const N: usize>: Copy {
+    fn to_words(&self) -> [u32; N];
+    fn from_words(words: &[u32; N]) -> Self;
 }
 
-impl FastSnapshot {
-    /// 纯构造：全零、`seq` 偶（可读）。
-    pub const fn empty() -> Self {
+/// 单写者 seqlock 槽：`seq` + N 个 payload word。
+///
+/// 发布/读取协议只在这里写一次；三个公开快照只是固定"谁能重试"的薄包装。
+#[derive(Debug)]
+struct Snapshot<V, const N: usize> {
+    seq: AtomicU32,
+    w: [AtomicU32; N],
+    _view: PhantomData<fn() -> V>,
+}
+
+impl<V: ViewWords<N>, const N: usize> Snapshot<V, N> {
+    const fn empty() -> Self {
         Self {
             seq: AtomicU32::new(0),
-            w: [const { AtomicU32::new(0) }; FAST_WORDS],
+            w: [const { AtomicU32::new(0) }; N],
+            _view: PhantomData,
         }
     }
 
     /// 单写者发布：`seq` 置奇（`Release`）、写 payload（逐 word `Relaxed`）、再置偶
     /// （`Release`）。调用者必须确认自己是唯一写者（PRE-04）。
-    pub fn write(&self, v: &FastView) {
+    fn write(&self, v: &V) {
         // 单写者 ⇒ 进入时 `seq` 必为偶，+1 即奇、+2 即偶，无需 CAS。
         let seq = self.seq.load(Ordering::Relaxed);
         self.seq.store(seq.wrapping_add(1), Ordering::Release);
-        for (dst, src) in self.w.iter().zip(v.encode().iter()) {
+        for (dst, src) in self.w.iter().zip(v.to_words().iter()) {
             dst.store(*src, Ordering::Relaxed);
         }
         self.seq.store(seq.wrapping_add(2), Ordering::Release);
+    }
+
+    fn read_once(&self) -> Option<V> {
+        read_words(&self.seq, &self.w, 1)
+            .0
+            .map(|w| V::from_words(&w))
+    }
+
+    fn read_retry(&self) -> Option<V> {
+        read_words(&self.seq, &self.w, config_budget::SNAPSHOT_RETRY_MAX)
+            .0
+            .map(|w| V::from_words(&w))
+    }
+}
+
+impl ViewWords<FAST_WORDS> for FastView {
+    fn to_words(&self) -> [u32; FAST_WORDS] {
+        self.encode()
+    }
+
+    fn from_words(words: &[u32; FAST_WORDS]) -> Self {
+        Self::decode(words)
+    }
+}
+
+impl ViewWords<CMD_WORDS> for CmdView {
+    fn to_words(&self) -> [u32; CMD_WORDS] {
+        self.encode()
+    }
+
+    fn from_words(words: &[u32; CMD_WORDS]) -> Self {
+        Self::decode(words)
+    }
+}
+
+impl ViewWords<GAIN_WORDS> for GainView {
+    fn to_words(&self) -> [u32; GAIN_WORDS] {
+        self.encode()
+    }
+
+    fn from_words(words: &[u32; GAIN_WORDS]) -> Self {
+        Self::decode(words)
+    }
+}
+
+/// 下行 seqlock：快环（prio 8）单写，慢环（prio 1–5）多读。
+#[derive(Debug)]
+pub struct FastSnapshot(Snapshot<FastView, FAST_WORDS>);
+
+impl FastSnapshot {
+    /// 纯构造：全零、`seq` 偶（可读）。
+    pub const fn empty() -> Self {
+        Self(Snapshot::empty())
+    }
+
+    /// 单写者发布（PRE-04）；发布协议只在 `Snapshot` 里实现一次。
+    pub fn write(&self, v: &FastView) {
+        self.0.write(v);
     }
 
     /// 一次尝试；写者正在写时返回 `None`，调用方用上一拍值。
@@ -309,9 +377,7 @@ impl FastSnapshot {
     /// 只适用于不会被 prio 8 写者抢占的读者。本快照的读者是 prio 1–5，会被抢占，
     /// 正常路径应使用 [`Self::read_retry`]。
     pub fn read_once(&self) -> Option<FastView> {
-        read_words(&self.seq, &self.w, 1)
-            .0
-            .map(|words| FastView::decode(&words))
+        self.0.read_once()
     }
 
     /// 有界重试（≤ [`config_budget::SNAPSHOT_RETRY_MAX`] 次），绝不阻塞。
@@ -319,36 +385,23 @@ impl FastSnapshot {
     /// 写者是 prio 8，会在读者执行期间抢占并完成发布，重试到 `s1 == s0` 即可；用完
     /// 次数仍不收敛就返回 `None`，调用方用上一拍值。
     pub fn read_retry(&self) -> Option<FastView> {
-        read_words(&self.seq, &self.w, config_budget::SNAPSHOT_RETRY_MAX)
-            .0
-            .map(|words| FastView::decode(&words))
+        self.0.read_retry()
     }
 }
 
 /// 上行 seqlock：慢环（prio 2–5）单写，快环（prio 8）只读。
 #[derive(Debug)]
-pub struct CmdSnapshot {
-    seq: AtomicU32,
-    w: [AtomicU32; CMD_WORDS],
-}
+pub struct CmdSnapshot(Snapshot<CmdView, CMD_WORDS>);
 
 impl CmdSnapshot {
     /// 纯构造：全零、`seq` 偶（可读）。
     pub const fn empty() -> Self {
-        Self {
-            seq: AtomicU32::new(0),
-            w: [const { AtomicU32::new(0) }; CMD_WORDS],
-        }
+        Self(Snapshot::empty())
     }
 
     /// 单写者发布（`can` @5 或 `calib` @2，二者由状态机保证互斥）。
     pub fn write(&self, v: &CmdView) {
-        let seq = self.seq.load(Ordering::Relaxed);
-        self.seq.store(seq.wrapping_add(1), Ordering::Release);
-        for (dst, src) in self.w.iter().zip(v.encode().iter()) {
-            dst.store(*src, Ordering::Relaxed);
-        }
-        self.seq.store(seq.wrapping_add(2), Ordering::Release);
+        self.0.write(v);
     }
 
     /// 一次尝试，这是电流环唯一允许的读法。
@@ -358,55 +411,42 @@ impl CmdSnapshot {
     /// 不提供 `read_retry`：该方向重试必然得到同一个 `None`（写者被冻结时 `seq` 保持
     /// 奇数），是死代码。
     pub fn read_once(&self) -> Option<CmdView> {
-        read_words(&self.seq, &self.w, 1)
-            .0
-            .map(|words| CmdView::decode(&words))
+        self.0.read_once()
     }
 }
 
 /// 增益 seqlock：`calib`（prio 2）单写，`can`/遥测（prio 5）多读。
 #[derive(Debug)]
-pub struct GainSnapshot {
-    seq: AtomicU32,
-    w: [AtomicU32; GAIN_WORDS],
-}
+pub struct GainSnapshot(Snapshot<GainView, GAIN_WORDS>);
 
 impl GainSnapshot {
     /// 纯构造：全零、`seq` 偶（可读）。
     pub const fn empty() -> Self {
-        Self {
-            seq: AtomicU32::new(0),
-            w: [const { AtomicU32::new(0) }; GAIN_WORDS],
-        }
+        Self(Snapshot::empty())
     }
 
     /// 单写者发布（只在 C6 冻结或显式重启时）。
     pub fn write(&self, v: &GainView) {
-        let seq = self.seq.load(Ordering::Relaxed);
-        self.seq.store(seq.wrapping_add(1), Ordering::Release);
-        for (dst, src) in self.w.iter().zip(v.encode().iter()) {
-            dst.store(*src, Ordering::Relaxed);
-        }
-        self.seq.store(seq.wrapping_add(2), Ordering::Release);
+        self.0.write(v);
     }
 
     /// 一次尝试；写者可能在读期间抢占（prio 2 对 prio 5），失败返回 `None`。
     pub fn read_once(&self) -> Option<GainView> {
-        read_words(&self.seq, &self.w, 1)
-            .0
-            .map(|words| GainView::decode(&words))
+        self.0.read_once()
     }
 
     /// 有界重试（≤ [`config_budget::SNAPSHOT_RETRY_MAX`] 次）：读者 prio 5 会被写者
     /// prio 2 抢占，但有界，绝不阻塞。
     pub fn read_retry(&self) -> Option<GainView> {
-        read_words(&self.seq, &self.w, config_budget::SNAPSHOT_RETRY_MAX)
-            .0
-            .map(|words| GainView::decode(&words))
+        self.0.read_retry()
     }
 }
 
 // 三个视图的字节布局与三个快照实例大小。
+const _: () = assert!(core::mem::size_of::<FastSnapshot>() == 4 + 4 * FAST_WORDS);
+const _: () = assert!(core::mem::size_of::<CmdSnapshot>() == 4 + 4 * CMD_WORDS);
+const _: () = assert!(core::mem::size_of::<GainSnapshot>() == 4 + 4 * GAIN_WORDS);
+
 const _: () = assert!(core::mem::size_of::<FastView>() == 64);
 const _: () = assert!(core::mem::offset_of!(FastView, t_us) == 0);
 const _: () = assert!(core::mem::offset_of!(FastView, i_abc_amps) == 8);
@@ -594,18 +634,18 @@ mod tests {
     fn seqlock_odd_seq_returns_none() {
         let fast = FastSnapshot::empty();
         fast.write(&sample_fast());
-        fast.seq.store(3, Ordering::Relaxed); // 手工构造 write 的中间态
+        fast.0.seq.store(3, Ordering::Relaxed); // 手工构造 write 的中间态
         assert_eq!(fast.read_once(), None);
         assert_eq!(fast.read_retry(), None);
 
         let cmd = CmdSnapshot::empty();
         cmd.write(&sample_cmd());
-        cmd.seq.store(1, Ordering::Relaxed);
+        cmd.0.seq.store(1, Ordering::Relaxed);
         assert_eq!(cmd.read_once(), None);
 
         let gain = GainSnapshot::empty();
         gain.write(&sample_gain());
-        gain.seq.store(9, Ordering::Relaxed);
+        gain.0.seq.store(9, Ordering::Relaxed);
         assert_eq!(gain.read_once(), None);
     }
 
@@ -616,20 +656,20 @@ mod tests {
     fn seqlock_retry_gives_up_after_n() {
         const N: u8 = 3;
         let snap = FastSnapshot::empty();
-        snap.write(&sample_fast());
-        let frozen = snap.seq.load(Ordering::Relaxed) + 1; // 奇：写者已暂停
-        snap.seq.store(frozen, Ordering::Relaxed);
+        snap.0.write(&sample_fast());
+        let frozen = snap.0.seq.load(Ordering::Relaxed) + 1; // 奇：写者已暂停
+        snap.0.seq.store(frozen, Ordering::Relaxed);
 
-        let (out, attempts) = read_words(&snap.seq, &snap.w, N);
+        let (out, attempts) = read_words(&snap.0.seq, &snap.0.w, N);
         assert!(out.is_none(), "永不收敛时必须返回 None");
         assert_eq!(attempts, N, "循环次数必须恰好是上限 N");
         assert!(attempts <= N);
-        assert_eq!(snap.seq.load(Ordering::Relaxed), frozen);
+        assert_eq!(snap.0.seq.load(Ordering::Relaxed), frozen);
 
         // 生产入口：上限来自 limits，永不超界，并且不阻塞（顺序执行即证明）。
         assert_eq!(snap.read_retry(), None);
         assert_eq!(snap.read_once(), None);
-        let (out, attempts) = read_words(&snap.seq, &snap.w, config_budget::SNAPSHOT_RETRY_MAX);
+        let (out, attempts) = read_words(&snap.0.seq, &snap.0.w, config_budget::SNAPSHOT_RETRY_MAX);
         assert!(out.is_none());
         assert!(attempts <= config_budget::SNAPSHOT_RETRY_MAX);
     }
@@ -643,8 +683,12 @@ mod tests {
         let snap = FastSnapshot::empty();
         let v = sample_fast();
 
-        snap.write(&v);
-        assert_eq!(snap.seq.load(Ordering::Relaxed) % 2, 0, "发布完成 ⇒ seq 偶");
+        snap.0.write(&v);
+        assert_eq!(
+            snap.0.seq.load(Ordering::Relaxed) % 2,
+            0,
+            "发布完成 ⇒ seq 偶"
+        );
         let Some(got) = snap.read_retry() else {
             panic!("发布完成的快照必须可读")
         };
@@ -654,7 +698,7 @@ mod tests {
         let mut v2 = v;
         v2.t_us += 1;
         v2.i_abc_amps = [2.0, 2.0, 2.0];
-        snap.write(&v2);
+        snap.0.write(&v2);
         let Some(got) = snap.read_once() else {
             panic!("无并发时 read_once 必须成功")
         };
