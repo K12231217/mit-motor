@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -54,7 +55,14 @@ def read_status(ser: serial.Serial) -> tuple[float, float]:
 
 
 def run_hil_capture(timeout_s: int = 30) -> str:
-    """烧录并抓一段 RTT；超时被杀属正常（固件常驻）。"""
+    """烧录并抓一段 RTT；超时被杀属正常（固件常驻）。
+
+    每次先删日志：probe-rs 的 `--target-output-file` 会追加，旧 boot 会污染解析。
+    """
+    try:
+        os.remove(LOG)
+    except OSError:
+        pass
     try:
         subprocess.run(
             ["cargo", "xtask", "hil"],

@@ -101,14 +101,20 @@ HIL: BLOCKED 2026-11-28 DAC→三路 ADC 斜坡（HR-804，`--dac-ramp`）
 - `dac-ramp code=512 … spread=7 follow=false`；`code=3584 … follow=false`；三路始终 ≈2039。
 - 判定：**J_SYNC 跳线未装**（PA4 未进电流采样输入），不是固件缺陷；装好后重跑 `cargo xtask hil --dac-ramp`。
 
-HIL: BLOCKED 2026-11-28 软件 OVP（VBUS 标度与网表不符）
+HIL: PASS 2026-11-28 软件 OVP（D2 拆除后，12/24/27.5 V 三档）
 
 - 新增：ADC2 注入 rank2 采 PB11/`ADC2_IN14`，`adc0 ... vbus=… mv=…` 每轮启动打印。
 - 实测矛盾：母线 0 V（电源 OUT0）→ `vbus=3918~3920`（≈2.39 V）；12 V → `4095` 饱和。
   按网表 100 kΩ/8.06 kΩ 分压，12 V 应约 `1466` 码。两者不符。
 - 2026-11-28 万用表（电源 OUT0）：VBUS=2.503 V、PB11=2.366 V ⇒ 实测比值 **0.945**，
   而网表分压应为 **0.0746**。结论：板上 `VBUS_ADC` 的实际分压与网表不符（近似直通），
-  12 V 时会直冲 PB11 依赖 D2 钳位 ⇒ **别再给母线加高压**，先查 R15/R23 装配与原理图。
+  12 V 时会直冲 PB11 依赖 D2 钳位。
+- 根因（2026-11-28）：**D2（BAT54S 钳位）装反/极性错**——3V3 经其内部二极管正偏灌入节点
+  （压差 0.744 V @0.3 mA）。拆掉 D2 后 PB11=0.20 V @VBUS 2.5 V，与分压一致。
+- 复测（D2 已拆、OVP 打开）：12 V→`vbus=1459`（11.94 V）；24 V→`2927`（23.95 V）；
+  27.5 V→`3357`（27.47 V）且 `ovp=TRIP`。`tools/ovp_check.py --expect-trip` 全过。
+- 待做（硬件）：D2 按 BAT54S 正确极性回装（pin3=VBUS_ADC、pin1=GND、pin2=3V3），
+  回装前该节点无 ESD/过压钳位。
 - 处理：`config_policy::VBUS_OVP_ENABLED = false`，OVP 默认关闭，避免 24 V 正常母线被误切；
   `ovp=0` 已复测。台架脚本 `tools/ovp_check.py` 默认只校验电压读数，不升到 27.5 V。
 - 待确认（人 + 万用表）：PB11 对地电压在 0/12 V 时各是多少；R15（应为 100 kΩ）与

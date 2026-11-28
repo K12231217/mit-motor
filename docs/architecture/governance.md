@@ -499,6 +499,20 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 
 ---
 
+## 轮次 19：软件 OVP 打通（根因是 D2 钳位装反）
+
+- 现象：VBUS 2.503 V 时 PB11=2.366 V（比值 0.945），而网表分压应为 0.0746；12 V 时 ADC 饱和 4095。
+- 排查：R15/R23 实测 100 kΩ/7.6 kΩ 正常；3V3=3.11 V，节点比 3V3 低 0.744 V ⇒ 3V3 经 D2 正偏灌入。
+- 结论：**D2（BAT54S）极性装反**，钳位二极管在低压就导通，把分压节点抬到 ~2.4 V。
+- 处理：拆 D2 后 PB11=0.20 V @2.5 V，分压正确；`VBUS_OVP_ENABLED=true`。
+- HIL（`tools/ovp_check.py --expect-trip`，Korad COM13）：12 V→11.94 V 不跳；24 V→23.95 V 不跳；
+  27.5 V→27.47 V，`ovp=TRIP`（MOE/六路关断 + nSLEEP 低 + TP2 冻结）。三档都 ≤ 62 mV 误差。
+- 防回归：脚本先低于 20 V 验证母线确实接到电源，读数偏差 >1.5 V 就中止不升压；每次抓 RTT 前删旧日志。
+- 删除：无。未决：D2 必须按 `pin3=VBUS_ADC / pin1=GND / pin2=3V3` 回装（当前无钳位保护）。
+- 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene`/`tier` PASS。
+
+---
+
 ## 轮次记录模板（下一轮起复制）
 
 ```md

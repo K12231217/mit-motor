@@ -233,10 +233,10 @@ pub const VBUS_OVP_RAW: u16 = (VBUS_OVP_MV as f32 / hw::VBUS_MV_PER_LSB + 0.5) a
 
 /// 软件 OVP 是否生效。
 ///
-/// **2026-11-28 实测未通过**：本板 PB11/`VBUS_ADC` 在母线 0 V 时读数 3920、
-/// 12 V 时饱和 4095，与网表 100 kΩ/8.06 kΩ 分压（预期 ~1466 码 @12 V）不符。
-/// 在确认实际分压/引脚之前，OVP 保持关闭，避免正常 24 V 被误判为过压。
-pub const VBUS_OVP_ENABLED: bool = false;
+/// **2026-11-28 实测**：拆掉正向导通的 D2（BAT54S 钳位把 3V3 灌进节点）后，
+/// 12.0 V 母线读 `vbus=1459`（11.94 V），与网表 100 kΩ/8.06 kΩ 分压一致。
+/// D2 需按正确极性回装；回装前该脚无钳位保护。
+pub const VBUS_OVP_ENABLED: bool = true;
 
 const _: () = assert!(VBUS_OVP_RAW > 0 && VBUS_OVP_RAW < 4095);
 
