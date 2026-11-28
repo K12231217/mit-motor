@@ -1,10 +1,10 @@
-# 固件文件架构（v0.1，2026-11-15 敲定）
+# 固件文件架构（v0.3，2026-11-28）
 
 > 本文是文件级唯一版本（crate 划分、任务表、数据流），取代旧 `architecture.md` 的 §4–§6；
-> 硬件事实见 [hardware-facts.md](archive/hardware-facts.md) §2。需求编号见 [hardware-requirements.md](hardware-requirements.md)。
-> **状态标记**：标 `[计划]`/`[未建]` 的条目没有代码；落地状态以 `.scratch/handoff.md` 为准，
-> 树与注册表不一致时 `cargo xtask hygiene`（H4/H6）会失败。
-> 本轮只定**文件与契约**，不落实现。
+> 硬件事实见 [`hardware-requirements.md`](hardware-requirements.md) §3.1/§5（旧 PCB14 事实在
+> [archive/hardware-facts.md](archive/hardware-facts.md)）。
+> **状态标记**：标 `[计划]`/`[未建]` 的条目没有代码；落地状态以 `.scratch/handoff.md` 与 §1.2 注册表的
+> `state` 列（由 `cargo xtask hygiene` 校验）为准。
 
 ## 1. 七条不变量（机械化的写命令；未落地的显式标 `未落地`）
 
@@ -326,12 +326,13 @@ impl Board {
 与 `ISR_COUNT`/`ISR_CYCLES`/`ADC_ERRORS` 三个 `AtomicU32`（`software/firmware/src/bin/main.rs`）。
 它们不参与控制决策；一旦有读者拿它做控制，就必须迁回 `Snapshot`。
 
-## 4. `bsp`：所有权表与两处 unsafe
+## 4. `bsp`：所有权表与 unsafe 白名单
 
 | 外设 | 归属 | 理由 |
 |---|---|---|
-| TIM1 / ADC1-3 / DMA1 / PWM GPIO | **只有 bsp 碰**，走裸寄存器 | 20 kHz 热路径，不许经过 HAL 的动态检查 |
-| FDCAN2 / USART3 / USB FS / SPI1 | 只有 bsp 碰，内部用 embassy-stm32/embassy-usb | 冷路径，不值得手写 |
+| TIM1 / ADC1-3 / PWM GPIO | **只有 bsp 碰**，走裸寄存器 | 20 kHz 热路径，不许经过 HAL 的动态检查 |
+| SPI1（双 MT6701 片选） | 只有 bsp 碰，内部用 embassy-stm32 | 冷路径；帧判据在 `algorithms` |
+| FDCAN1 / USART3 / USB | 未实现或未启用（HR §3.1：CAN 是 FDCAN1、USART3 本季不用、本板无 USB） | 落地时由 bsp 持有，类型不外泄 |
 | RCC / PWR | embassy 配，bsp **读回校验** | 时钟树只能一个主人 |
 
 两条不可协商的硬件契约（寄存器级，`init()` 必须逐条读回校验）：
@@ -364,9 +365,9 @@ impl Board {
 
 | prio | 任务 | 绑定 | 周期 | 预算 |
 |---|---|---|---|---|
-| 8 | `current` | ADC DMA 完成 | 50 µs | ≤25 µs（含快照发布 <0.5 µs）|
-| 7 | `brk` / `nfault` | TIM1_BRK / EXTI | 异步 | ≤2 µs（只锁存）|
-| 5 | `can` | FDCAN2_IT0 | 帧驱动 | ≤10 µs |
+| 8 | `current` | TIM1_UP（现）/ ADC 完成（DMA 为规划） | 50 µs | ≤25 µs（含快照发布 <0.5 µs）|
+| 7 | `nfault` | EXTI（nFAULT PC8；**本板无 TIM1_BRK**） | 异步 | ≤2 µs（只锁存）|
+| 5 | `can` | FDCAN1_IT0 | 帧驱动 | ≤10 µs |
 | 2 | `calib` | 软件 dispatcher | 10 ms | 剩余预算 |
 | 1 | `io` | executor，常驻 | 事件驱动 | 仅冷路径 |
 | idle | **不可达** | — | — | WFE 在 executor 内部完成 |
@@ -378,10 +379,10 @@ impl Board {
 
 | 区 | 位置 | 内容 | 大小 |
 |---|---|---|---|
-| `.uninit.trace` | SRAM2 @0x20014000 | `TraceFrame[1024]`（16 B/帧）| 16 KB（**规划**；当前 T-014 用 `.bss` 2048 帧=32 KB） |
-| `.uninit.log` | SRAM2 +16K | `LogEntry[512]`（12 B/条）| 6 KB |
-| `.uninit.magic` | SRAM2 +22K | magic + 版本 + CRC | 256 B |
-| BKPR0..15 | RTC 备份寄存器 | 标定摘要（定点零位/增益、板 UID、OVP 实测点）| 64 B |
+| 录波环 | `.bss`（现） | `TraceFrame[2048]`（16 B/帧）；`.uninit` 预置方案已裁决取消 | 32 KiB |
+| `.uninit.log` | SRAM2 +16K | [计划] `LogEntry[512]`（12 B/条）| 6 KB |
+| `.uninit.magic` | SRAM2 +22K | [计划] magic + 版本 + CRC | 256 B |
+| BKPR0..15 | RTC 备份寄存器 | [计划] 标定摘要（定点零位/增益、板 UID、OVP 实测点）| 64 B |
 
 - **限制必须写进文档**：PCB14 的 `VBAT` 并在 `+3V3` 上，备份寄存器与 SRAM2 一样**只活过复位、活不过掉电**；
   要掉电保存只能写 flash（20 ms，不能进 fault handler，只能重启后回写）。
@@ -397,29 +398,32 @@ const _: () = assert!(size_of::<Event>() <= 32);
 
 任何字段改动都会**编译失败**——这是"给 AI 填空"最有效的一道锁。
 
-## 9. 检查手段（CI，`cargo xtask arch`）
+## 9. 检查手段（唯一实现：`software/xtask/src/checks.rs`）
 
-实现在 `software/xtask/src/checks.rs`（纯 Rust，无 shell 依赖）。
+命令是 `cargo xtask arch`。本节只回答"哪条不变量由哪段代码检查"，**不复写 shell 命令行**：
+复写的那份一定会和 `checks.rs` 漂移，而漂移过的检查比没有检查更危险。
 
-1. `cargo tree -p algorithms | grep -E "bsp|embassy-stm32|embassy-executor|rtic"` → 必须为空；
-2. `cargo tree -p system | grep -E "stm32|embassy-stm32|embassy-executor|rtic"` → 必须为空；
-3. `grep -rn "unsafe" software/contracts/src software/system/src software/algorithms/src` → 必须为空；
-4. `grep -rn "await\|defmt\|\.lock()" software/app/src/tasks/current.rs` → 必须为空；
-5. `llvm-nm target/.../app | grep __rust_alloc` → 必须为空；
-6. `cargo build --release && llvm-objcopy -O binary`，统计 Flash/RAM 占用写进 CI 日志；
-7. I7：`MotorState` 只允许在 `software/contracts/src/joint/protocol_fsm.rs`、`software/algorithms/src/joint/service_fsm.rs` 与两处 crate 根出现
-   （其余文件拿到它就能写第二条迁移路径）。
+| # | 实现 | 扫描范围 |
+|---|---|---|
+| I1 | `check_deps` | `cargo tree -p algorithms` 的包名/版本两列 |
+| I2 | `check_unsafe` | `software/{contracts,algorithms}/src`（豁免 lint 名 `unsafe_code`） |
+| I3 | `check_no_heap` | `cargo xtask rel` 的 release ELF（`llvm-nm`） |
+| I4 | `check_isr_purity` | `software/firmware/src/bin/main.rs` 的 TIM1 更新 ISR 体 |
+| I7 | `check_fsm_single_owner` | `software/{contracts,algorithms}/src` 的 `MotorState` 命名 |
 
-8. **待落地**（`bsp`/`system`/`app` 建好后再接进 `cargo xtask arch`）：MECH-01 的
-   `static mut`/`static Option<驱动>` grep、MECH-02 的 `dyn` grep、MECH-03 的热路径签名 grep、
-   MECH-04 的 `core::fmt` 符号审查。未建 crate 的检查记为 N/A，不计 PASS。
+- Flash/RAM 统计不在 `arch` 里：用 `cargo xtask size`（PRE-09）。
+- 协作门禁用 `cargo xtask hygiene`（H2/H4/H5/H6），细则在
+  [`agent-guardrails.md`](archive/agent-guardrails.md)；§1.2 的注册表由 H6 解析。
+- **未落地**：MECH-01/02/03/04 的静态 grep 与 `core::fmt` 符号审查——`system`/`app` 建好后
+  才接进 `arch`，未建 crate 记 N/A，不计 PASS。
 
-9. 协作门禁（`cargo xtask hygiene`，落点见 [`agent-guardrails.md`](archive/agent-guardrails.md)）：
-   H2 的 `TODO(owner, trigger)`、H5 的注释标记，以及 H4 —— 每个 `<crate>/src/**/*.rs`
-   必须出现在上面 §2 的文件树块里。新增模块不写文档即 FAIL。
+## 10. 未定项
 
-## 10. 未定项（不影响文件架构，但影响第一行实现）
+只看两个地方，本节不复写：
 
-1. **三路 ADC 的"采完"信号**：挂在 ADC3 EOC 还是读上一拍（建议后者，确定性最好）→ 决定 `take_sample()` 语义。
-2. **`embassy_stm32::init()` 与裸 PAC 单例的衔接**：需 30 行探针确认（`steal()` 还是从返回的 Peripherals 里取）。
-3. **`algorithms` 的测试载体**：`tests/` 用 host `cargo test` + `fixtures/*.bin`，还是单独 `tools/replay`。建议后者，`algorithms` 只留最小单测。
+- 产品/硬件层面的待裁决：[`INDEX.md`](INDEX.md) §4 与 [`hardware-requirements.md`](hardware-requirements.md) §8；
+- 实现进度与 HIL 证据：[`.scratch/handoff.md`](../.scratch/handoff.md)。
+
+已经关闭的旧条目（三路 ADC 采完信号、embassy 与裸 PAC 衔接、算法测试载体）分别落在
+`bsp.motor.bus_adc`、`firmware/src/bin/main.rs` 的 `embassy_stm32::init` 调用、以及各模块的
+`tests.rs`，不再列为未定项。

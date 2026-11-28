@@ -98,7 +98,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | PRE-05 配置期断言 | 器件事实用 `const _: () = assert!` | `deadtime_dtg()` 在运行期调用点执行 `assert!` | `bus_pwm.rs:291-294`，调用 `:149` | 可（`const DTG` 化） |
 | MECH-05 注册表 owner 真实 | owner = 唯一实际写者 | TIM1→`bringup`、GainGate→`current`、编码器双声明 | `docs/software-architecture.md:66,71,65` vs `main.rs:79,291` | 难（需静态分析）；当前 H6 只查非空 |
 | H6 文件覆盖 | 每个源码文件恰好被一个模块覆盖 | `/mod.rs` 与 `/src/bin/` 一律豁免，且可匹配**任意** ID | `hygiene.rs:393-405`（`is_module_tree_file` 短路返回 true） | 可（收紧规则） |
-| 不变量清单 | 架构文档 I1–I6；AGENTS 说 arch 实现 I1/I2/I3 | 代码实现 I1/I2/I3/**I7**；doc 无 I7 | `checks.rs:29-70`、`docs/software-architecture.md` §1 | 可（补 I7 定义） |
+| 不变量清单 | 文档与实际一致 | 代码实现 I1/I2/I3/I4/I7；旧文档无 I7 | `checks.rs`、`docs/software-architecture.md` §1 | **已解决（轮次 2）**：§1 补齐 I7，I5/I6 标未落地 |
 | 模块/命名 | `algorithms`/`contracts` | 注释引用旧 crate `user::` 共 8 处 | `bus_encoder.rs:3`、`protocol_fsm.rs:3,10,49`、`service_supervisor.rs:5`、`config_policy.rs:230`、`config_hw.rs:6,106` | 可（grep 门禁） |
 | 文档状态 | 只写当前事实 | `bsp/src/lib.rs:9` 仍称 `bus_adc`/`service_dwt` 是 `todo!()`（已实现） | 同左 | **已解决（轮次 4/8）**：该行已改；注册表 `state` 与 `todo!()` 由 H6 交叉校验 |
 
@@ -136,7 +136,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R11 | firmware/bsp 注释级纠偏（`TRACE_FLAG_SELFTEST` 悬空 link、`bus_pwm.rs:101` 的 PB10 措辞） | B（Tier B，注释级） | (a) 与 R8/R9 同批做，一次 HIL 签收；(b) 单独做并标 `PENDING_HIL` | (a) |
 | R12 | `bsp` 的 fmt/clippy 覆盖（thumb crate，当前无人检查） | A | (a) 以 `CARGO_BUILD_TARGET=thumbv7em-none-eabihf --manifest-path software/bsp/Cargo.toml` 跑；(b) 让 firmware 的 `-p bsp` 生效需先并入同一 workspace（会破坏独立 workspace 约定） | (a) 评估构建副作用 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；R3 hold（§9-1）；R7/R9–R11 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；架构文档 §4–§10 纠偏完成（轮次 10）；R3 hold（§9-1）；R7/R9–R11 待做。
 
 ### 9. 待确认（人）
 
@@ -322,6 +322,27 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：bsp 的格式与 lint 退化现在会让 `cargo xtask fmt-check` / `clippy` 直接失败。
 - 验证：`fmt-check`/`clippy`/`test`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
 - 未决项：`bsp` 仍无 host 测试（no_std + 寄存器，属 HIL 域）；`cargo xtask check`/`build` 仍只覆盖 firmware。
+
+---
+
+## 轮次 10：架构文档 §4–§10 只写当前树（去掉第二份门禁清单）
+
+- 熵源：§6「不变量清单」行残留、§7「测试与工具链」；文档自述"v0.1 只定契约不落实现"
+- 调用方核实：
+  - §9 用 9 条 shell 命令复写 `checks.rs`，其中 `cargo tree -p system`（无此 crate）、`software/app/src/tasks/current.rs`（不存在）、`llvm-nm target/.../app`（文件名不对）三条无法执行；I7 的实现函数名从未出现。
+  - §4 表把 `FDCAN2 / USART3 / USB FS` 列为在用外设；HR §3.1 的最新网表是 FDCAN1、USART3 本季不启用、本板无 USB。
+  - §6 任务表写 `TIM1_BRK`，而本板无 BKIN（HR §3.1）；`current` 绑定写"ADC DMA 完成"，现实现是 TIM1_UP。
+  - §7 写 `.uninit.trace` 1024 帧/16 KB，与已裁决的 2048 帧/32 KiB 冲突；`.uninit.log/.magic`、BKPR 无代码却未标计划。
+  - §10 三条"未定项"全部已关闭（注入组、embassy 初始化、内联 `tests.rs`）。
+  - 实测 unsafe：`bsp` 只有 `service_dwt.rs:34` 一个块，标题"两处 unsafe"不成立。
+- 选定方案：§9 改成"不变量 → 实现函数 → 扫描范围"的指针表，并明确不复写命令行；§4/§6/§7 按 HR §3.1 与已裁决项纠正；§10 改为指针；标题升 v0.3 并删掉"不落实现"。
+- 放弃方案：给 §9 的 9 条命令加"已废弃"标注 —— 保留了第二份清单，迟早再次漂移。
+- 行为基线：纯文档；`arch`/`hygiene`/`test`/`doc` 输出不变。
+- 迁移完成：§4、§6、§7、§9、§10、文档头。
+- 删除的旧实现：§9 的 9 条 shell 复写、§10 的三条已关闭未定项、§7 的 1024 帧方案。
+- 防回归约束：无新增机器检查；§9 的指针表由人工对照 `checks.rs`（可机器化的部分已在 `arch` 本身）。
+- 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
+- 未决项：§5 的 `system` 边界（crate 未建）仍按计划保留；§6 的 `idle 不可达` 等 RTIC 细节待 `app` 落地复核。
 
 ---
 
