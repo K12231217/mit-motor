@@ -21,9 +21,9 @@
 | # | 铁律 | 检查手段 |
 |---|---|---|
 | PRE-01 | **无堆**：链接产物零 `__rust_alloc`；`algorithms`/`app` 不得引入 `alloc` | `llvm-nm <elf> \| grep __rust_alloc` 为空 |
-| PRE-02 | **20 kHz 环纯净**：只由硬件事件驱动，禁 `await` / `defmt` / `.lock()` / 堆；预算 ≤ 25 µs，DWT 实测值进遥测 | `grep -n "await\|defmt\|\.lock()" software/app/src/tasks/current.rs` 为空 |
+| PRE-02 | **20 kHz 环纯净**：只由硬件事件驱动，禁 `await` / `defmt` / `.lock()` / 堆；预算 ≤ 25 µs，DWT 实测值进遥测 | `cargo xtask arch` I4：`software/firmware/src/bin/main.rs` 的 TIM1 ISR 体零命中（`app` 落地后改指向 `app.motor.task_current`） |
 | PRE-03 | **unsafe 白名单**：仅 `software/bsp/src/**` 与 `software/app/src/{fault,sections}.rs`；其余 crate 根 `#![forbid(unsafe_code)]` | `grep -rn unsafe` 白名单比对 |
-| PRE-04 | **跨优先级只有两种通道**：seqlock `Snapshot<T>` 与有界队列；**单写者**；满即丢并计数；禁重试循环 | 每个队列有 `dropped` 计数器且进状态字 |
+| PRE-04 | **跨优先级只有两种控制通道**：seqlock `Snapshot<T>` 与有界队列；**单写者**；满即丢并计数；禁重试循环。**诊断例外（ADR-16）**：只读、单向、有界的诊断数据（录波环、`AtomicU32` 计数）可绕过，条件是单写者、读者不回灌控制、写者内无锁/分配/重试、并在模块注册表登记 | 每个队列有 `dropped` 计数器且进状态字；诊断通道在注册表有 owner/contract |
 | PRE-05 | **无静默继续**：时钟/CRC/magic 校验失败一律进 fault dump；禁 `unwrap/expect/indexing_slicing`（clippy deny）；关键错误不得 `let _ =` 吞掉 | `cargo xtask clippy -D warnings` |
 | PRE-06 | **量纲进标识符**：`_us/_rad/_rad_s/_amps/_v/_duty/_raw/_lsb`；同一参数不得跨模式换量纲 | review |
 | PRE-07 | **数值唯一来源**：器件事实与电气硬约束在 `software/contracts/src/motor/config_hw.rs`，时序与容量在 `software/contracts/src/joint/config_budget.rs`，策略参数在 `software/algorithms/src/motor/config_policy.rs`；文档只引编号不复写数值 | grep 数值重复 |

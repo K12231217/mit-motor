@@ -254,8 +254,11 @@ None
 
 上行快照（24 B）：`{ t_us: u64, dq: [f32;2], mode, seq, flags, rsvd0, ttl_ms, bench_phase, bench_amps_10ma }`（`CmdView`，无填充）。
 
-两个快照各自定长、各自一个具体类型（`FastSnapshot` = 16 word / `CmdSnapshot` = 6 word），
-**不用 `const N` 泛型参数**——避免同一份代码在不同 N 上被单态化多次。
+三个快照各自定长、各自一个具体类型（`FastSnapshot` = 16 word / `CmdSnapshot` = 6 word /
+`GainSnapshot` = 8 word），发布与读取协议收在私有的 `Snapshot<V, N>` 里（ADR-17）。
+`const N` 会把 `write/read_once` 按 16/6/8 单态化三次；当前固件还没有快照调用方，
+单态化产物为零，协议只有一份。`app` 落地后以 `cargo xtask size` 复核；若三次单态化
+挤占预算，再退回"非泛型超集 + 定长切片"，不拆回三份手写协议。
 
 ### 3.2 `events.rs` —— 慢速任务之间的事件与指令
 
@@ -307,6 +310,19 @@ impl Board {
 
 `algorithms` 只依赖 `contracts`；需要硬件时由 `app` 把 `&mut Board` 传进去，单板单实例，
 最多一个泛型参数，禁 trait object。`Snapshot<T>` 是跨任务唯一的最新值通道（PRE-04）。
+
+### 3.4 诊断通道（ADR-16）
+
+控制路径只认 `Snapshot` 与有界队列。**只读诊断数据**可以走第三条路，但必须同时满足：
+
+1. 单写者、单向：写者是最快的任务/ISR，读者只观察，永不回灌控制；
+2. 有界且不阻塞：环形槽覆盖最旧帧，或原子计数自增；写者内无锁、无分配、无重试；
+3. 在模块注册表登记 owner 与 contract；
+4. 丢失是可接受语义：计数用原子自增，环形用覆盖最旧，不假装无损。
+
+现行实例：`app.motor.service_trace`（`software/firmware/src/bin/trace/mod.rs`，2048×16 B 环）
+与 `ISR_COUNT`/`ISR_CYCLES`/`ADC_ERRORS` 三个 `AtomicU32`（`software/firmware/src/bin/main.rs`）。
+它们不参与控制决策；一旦有读者拿它做控制，就必须迁回 `Snapshot`。
 
 ## 4. `bsp`：所有权表与两处 unsafe
 

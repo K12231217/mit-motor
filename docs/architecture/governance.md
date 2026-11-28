@@ -92,7 +92,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | 规则 | 期望 | 实际 | 证据 | 可否机器强制 |
 |---|---|---|---|---|
 | PRE-07 数值唯一来源 | 文档只引编号 | INDEX §1 复写 5 个常量 | `docs/INDEX.md:13,15,16` | 可（`doc_check` 未落地） |
-| PRE-04 两种交叉通道 | 仅 Snapshot/队列 | `TRACE` 静态环 + 控制台计数 | `trace/mod.rs:253`、`main.rs:46-48` | 部分（可白名单） |
+| PRE-04 两种交叉通道 | 仅 Snapshot/队列 | `TRACE` 静态环 + 控制台计数 | `trace/mod.rs:253`、`main.rs:46-48` | **已解决（轮次 7）**：ADR-16 把只读诊断通道写进 PRE-04 |
 | MECH-01 驱动不设全局 static | 无 `static` 驱动 | `pub static TRACE`（数据环，非驱动对象） | `trace/mod.rs:253` | 可（区分驱动/数据） |
 | PRE-05 配置期断言 | 器件事实用 `const _: () = assert!` | `deadtime_dtg()` 在运行期调用点执行 `assert!` | `bus_pwm.rs:291-294`，调用 `:149` | 可（`const DTG` 化） |
 | MECH-05 注册表 owner 真实 | owner = 唯一实际写者 | TIM1→`bringup`、GainGate→`current`、编码器双声明 | `docs/software-architecture.md:66,71,65` vs `main.rs:79,291` | 难（需静态分析）；当前 H6 只查非空 |
@@ -135,7 +135,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R11 | firmware/bsp 注释级纠偏（`TRACE_FLAG_SELFTEST` 悬空 link、`bus_pwm.rs:101` 的 PB10 措辞） | B（Tier B，注释级） | (a) 与 R8/R9 同批做，一次 HIL 签收；(b) 单独做并标 `PENDING_HIL` | (a) |
 | R12 | `bsp` 的 fmt/clippy 覆盖（thumb crate，当前无人检查） | A | (a) 以 `CARGO_BUILD_TARGET=thumbv7em-none-eabihf --manifest-path software/bsp/Cargo.toml` 跑；(b) 让 firmware 的 `-p bsp` 生效需先并入同一 workspace（会破坏独立 workspace 约定） | (a) 评估构建副作用 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5）；seqlock 归一完成（轮次 6）；R3 hold（§9-1）；R4/R7–R12 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；R3 hold（§9-1）；R7–R12 待做。
 
 ### 9. 待确认（人）
 
@@ -268,6 +268,25 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：`size_of::<{Fast,Cmd,Gain}Snapshot>() == 4 + 4·N` 三条编译期断言；44 个 host 测试（含 odd-seq/重试上限/不撕裂）。
 - 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
 - 未决项：无（`Snapshot` 的 M4 内存序论证仍只在注释里，需 LA 实测才能说"已验证"）。
+
+---
+
+## 轮次 7：宪法追上代码（ADR-16 诊断通道 / ADR-17 seqlock 槽）
+
+- 熵源：§5「跨优先级通道」行（诊断通道未入宪法）；§6「PRE-04」行；§3.1 文档声称"不用 `const N`"而轮次 6 已用
+- 调用方核实：
+  - `AGENTS.md:26` PRE-04 只认 Snapshot/队列，而 `trace/mod.rs` 的 2048×16 B 静态环与 `main.rs` 三个 `AtomicU32` 一直在用第三条路。
+  - `docs/software-architecture.md:257` 原写"**不用 `const N` 泛型参数**——避免同一份代码在不同 N 上被单态化多次"，与轮次 6 的实现相反。
+  - 快照当前无生产调用方（`grep -rn "FastSnapshot\|CmdSnapshot\|GainSnapshot" software` 只命中 contracts 自身与 re-export），因此单态化产物为零。
+  - `AGENTS.md:24` PRE-02 的检查路径仍指向不存在的 `software/app/src/tasks/current.rs`。
+- 选定方案：ADR-16 把诊断通道写进 PRE-04（四条条件 + 现有实例）；ADR-17 把 `Snapshot<V, N>` 的取舍写清楚，并把"单态化成本"交给 `cargo xtask size` 在 `app` 落地后裁决；PRE-02 的检查改指 I4 的真实锚点。
+- 放弃方案：(a) 把 TRACE 环改造成 `Snapshot` —— 读者要历史窗口，不是最新值，语义不对；(b) 为单态化提前改成"非泛型超集 + 定长切片" —— 当前无调用方，属于为假想成本付复杂度。
+- 行为基线：纯规则/文档；`test`/`arch`/`hygiene` 输出不变。
+- 迁移完成：PRE-04 例外、PRE-02 检查路径、架构 §3.4、§3.1 的 `const N` 决策、ADR 索引 16/17。
+- 删除的旧实现：architecture §3.1 的"不用 const N"结论（被 ADR-17 取代）；`protocol_snapshot.rs` 里重复的三条 size 断言。
+- 防回归约束：无新增机器检查；诊断通道仍靠注册表 + 人工复核（可机器化的只有"静态环必须有 owner"，已在 H6）。
+- 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
+- 未决项：`ISR_COUNT/ISR_CYCLES/ADC_ERRORS` 没有独立模块条目（寄生在 `app.motor.task_bringup`），是否升为 `app.motor.service_diag` 待 `app` 落地。
 
 ---
 

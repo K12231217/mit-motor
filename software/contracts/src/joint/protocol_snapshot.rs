@@ -442,11 +442,7 @@ impl GainSnapshot {
     }
 }
 
-// 三个视图的字节布局与三个快照实例大小。
-const _: () = assert!(core::mem::size_of::<FastSnapshot>() == 4 + 4 * FAST_WORDS);
-const _: () = assert!(core::mem::size_of::<CmdSnapshot>() == 4 + 4 * CMD_WORDS);
-const _: () = assert!(core::mem::size_of::<GainSnapshot>() == 4 + 4 * GAIN_WORDS);
-
+// 三个视图的字节布局；三个快照实例大小在文件末尾统一断言。
 const _: () = assert!(core::mem::size_of::<FastView>() == 64);
 const _: () = assert!(core::mem::offset_of!(FastView, t_us) == 0);
 const _: () = assert!(core::mem::offset_of!(FastView, i_abc_amps) == 8);
