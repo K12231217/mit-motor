@@ -60,6 +60,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 
 > 结论：注册表 owner 列有 3 处与代码不符（TIM1、GainGate、编码器边界），且
 > H6 只校验 owner 非空（`hygiene.rs:348-356`），不校验真实性。
+> **部分解决（轮次 8）**：state 列与 `todo!()` 已机器对齐；owner 是否是"唯一实际写者"仍需静态分析，未解决。
 
 ### 4. 重复实现清单
 
@@ -99,7 +100,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | H6 文件覆盖 | 每个源码文件恰好被一个模块覆盖 | `/mod.rs` 与 `/src/bin/` 一律豁免，且可匹配**任意** ID | `hygiene.rs:393-405`（`is_module_tree_file` 短路返回 true） | 可（收紧规则） |
 | 不变量清单 | 架构文档 I1–I6；AGENTS 说 arch 实现 I1/I2/I3 | 代码实现 I1/I2/I3/**I7**；doc 无 I7 | `checks.rs:29-70`、`docs/software-architecture.md` §1 | 可（补 I7 定义） |
 | 模块/命名 | `algorithms`/`contracts` | 注释引用旧 crate `user::` 共 8 处 | `bus_encoder.rs:3`、`protocol_fsm.rs:3,10,49`、`service_supervisor.rs:5`、`config_policy.rs:230`、`config_hw.rs:6,106` | 可（grep 门禁） |
-| 文档状态 | 只写当前事实 | `bsp/src/lib.rs:9` 仍称 `bus_adc`/`service_dwt` 是 `todo!()`（已实现） | 同左 | 可（人工，或由 H6 绑定状态字段） |
+| 文档状态 | 只写当前事实 | `bsp/src/lib.rs:9` 仍称 `bus_adc`/`service_dwt` 是 `todo!()`（已实现） | 同左 | **已解决（轮次 4/8）**：该行已改；注册表 `state` 与 `todo!()` 由 H6 交叉校验 |
 
 ### 7. Phase 1：12 域分级
 
@@ -135,7 +136,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R11 | firmware/bsp 注释级纠偏（`TRACE_FLAG_SELFTEST` 悬空 link、`bus_pwm.rs:101` 的 PB10 措辞） | B（Tier B，注释级） | (a) 与 R8/R9 同批做，一次 HIL 签收；(b) 单独做并标 `PENDING_HIL` | (a) |
 | R12 | `bsp` 的 fmt/clippy 覆盖（thumb crate，当前无人检查） | A | (a) 以 `CARGO_BUILD_TARGET=thumbv7em-none-eabihf --manifest-path software/bsp/Cargo.toml` 跑；(b) 让 firmware 的 `-p bsp` 生效需先并入同一 workspace（会破坏独立 workspace 约定） | (a) 评估构建副作用 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；R3 hold（§9-1）；R7–R12 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R3 hold（§9-1）；R7/R9–R12 待做。
 
 ### 9. 待确认（人）
 
@@ -287,6 +288,24 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：无新增机器检查；诊断通道仍靠注册表 + 人工复核（可机器化的只有"静态环必须有 owner"，已在 H6）。
 - 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
 - 未决项：`ISR_COUNT/ISR_CYCLES/ADC_ERRORS` 没有独立模块条目（寄生在 `app.motor.task_bringup`），是否升为 `app.motor.service_diag` 待 `app` 落地。
+
+---
+
+## 轮次 8：注册表的 state 列与 `todo!()` 机器对齐
+
+- 熵源：§6「MECH-05 注册表 owner 真实」行、「文档状态」行；§7「测试与工具链」
+- 调用方核实：
+  - `grep -rn "todo!()" software --include=*.rs` 命中 2 个真实桩：`bsp/src/lib.rs:39`（`Board::init`）、`bsp/src/motor/bus_encoder.rs:12`（`read_raw`）。
+  - 注册表 34 行原本只有 id/path/owner/contract 四列，H6 只校验 owner 非空，**无法回答"这个模块是不是桩"**；`docs/software-architecture.md:5` 又刚把状态指针从 `as-built.md` 移走，状态一度只剩 handoff 散文。
+- 选定方案：注册表加 `state` 列（`impl`/`scaffold`），H6 与文件内容交叉校验：标 `impl` 却有 `todo!()`、或标 `scaffold` 却没有，都 FAIL；文档注释里提到 `todo!()` 不算。
+- 放弃方案：(a) 把 `todo!()` 当作 TODO 标记让 H2 检查 —— 与仓库"空壳脚手架 + Worker 填函数体"的流程冲突，脚手架本来就是合法状态；(b) 另建 `STATUS.md` —— 控制文件已限定三个，状态属于模块属性，放注册表最省。
+- 行为基线：改前 `cargo xtask hygiene` PASS（34 模块 / 42 文件）；改后 PASS（34 模块 / 42 文件，scaffold 2）。
+- 迁移完成：注册表 34 行加 state；两个 scaffold 行；H6 解析（5 列）与 `todo_state` 扫描；AGENTS 命令描述。
+- 删除的旧实现：无（新增约束）。
+- 防回归约束：H6 的 state↔`todo!()` 交叉校验；新增模块必须同时声明 state。
+- 反证：把 `bsp.motor.bus_encoder` 临时改成 `impl` → H6 FAIL 并点名该文件；还原后 PASS。
+- 验证：`fmt-check`/`clippy`/`test`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
+- 未决项：owner 是否等于"唯一实际写者"仍无静态检查；`ISR_*` 计数器与 TRACE 的 state 由其宿主模块代表。
 
 ---
 

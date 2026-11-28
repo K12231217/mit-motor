@@ -47,46 +47,48 @@
 `software/xtask` 是 host 工具，不在注册表内：四轴 layer 闭集没有 `tool`，它不是发货固件的一部分。
 它由 `cargo xtask fmt-check` / `clippy` 自身覆盖（同一份工具不给自己留门禁外的地盘）。
 
-H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一且四轴合法、owner/contract 非空。
-表是模块名与所有权的唯一真源；`cargo xtask hygiene` 失败即阻断。
+H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一且四轴合法、owner/contract 非空、
+`state` 只有 `impl`/`scaffold` 且与该文件是否含 `todo!()` 一致（标 `impl` 却有 `todo!()`，
+或标 `scaffold` 却没有，都 FAIL）。表是模块名、所有者与落地状态的唯一真源；`cargo xtask hygiene` 失败即阻断。
 
 <!-- module-registry:start -->
-| module id | path | owner | contract |
-|---|---|---|---|
-| `lib.joint.protocol_icd` | `software/contracts/src/joint/protocol_icd.rs` | `lib` | 线协议布局与解码；只读、无策略 |
-| `lib.joint.protocol_wire` | `software/contracts/src/joint/protocol_wire.rs` | `lib` | 线协议与内部类型换算的唯一入口；无策略 |
-| `lib.joint.protocol_events` | `software/contracts/src/joint/protocol_events.rs` | `lib` | 队列事件与命令；单写者 |
-| `lib.joint.protocol_faults` | `software/contracts/src/joint/protocol_faults.rs` | `lib` | 状态字位域；纯函数 |
-| `lib.joint.protocol_snapshot` | `software/contracts/src/joint/protocol_snapshot.rs` | `lib` | seqlock；每个方向单写者 |
-| `lib.joint.protocol_fsm` | `software/contracts/src/joint/protocol_fsm.rs` | `lib` | 状态机类型；不含迁移规则 |
-| `lib.motor.protocol_trust` | `software/contracts/src/motor/protocol_trust.rs` | `lib` | Trust 枚举；Unknown=0 |
-| `lib.motor.protocol_types` | `software/contracts/src/motor/protocol_types.rs` | `lib` | 物理量与定点类型；无策略 |
-| `lib.motor.config_hw` | `software/contracts/src/motor/config_hw.rs` | `lib` | 器件事实与电气硬约束；编译期断言 |
-| `lib.joint.config_budget` | `software/contracts/src/joint/config_budget.rs` | `lib` | 系统预算；只读 |
-| `lib.joint.service_contracts` | `software/contracts/src/lib.rs` | `lib` | crate 根与 re-export；无状态 |
-| `bsp.motor.service_clock` | `software/bsp/src/motor/service_clock.rs` | `init` | HSE 16M/PLL 170M 配置与读回；不匹配进 fault |
-| `bsp.motor.bus_pwm` | `software/bsp/src/motor/bus_pwm.rs` | `current @8` | TIM1 20 kHz/500 ns；无 BKIN（BKE=0）；enable 检查 nFAULT |
-| `bsp.motor.bus_adc` | `software/bsp/src/motor/bus_adc.rs` | `current @8` | ADC1/2/3 注入组 + TIM1_TRGO2；低边窗口由 MOE+CCxNE 实时判定 |
-| `bsp.motor.bus_encoder` | `software/bsp/src/motor/bus_encoder.rs` | `current @8` | SPI1 总线唯一所有者；只搬字节，不判帧 |
-| `bsp.motor.service_dwt` | `software/bsp/src/motor/service_dwt.rs` | `current @8` | DWT CYCCNT；先开 DCB.TRCENA，再使能计数器 |
-| `bsp.motor.service_timebase` | `software/bsp/src/motor/service_timebase.rs` | `init` | TIM5 1 MHz，defmt 时间戳；32 位回绕 |
-| `bsp.motor.service_trace` | `software/bsp/src/motor/service_trace.rs` | `current @8` | PB6/PB7 TP_SYNC、DAC1 残差/冻结；无锁无日志 |
-| `bsp.joint.service_board` | `software/bsp/src/lib.rs` | `init` | Board 单实例；构造后 move 移交 |
-| `lib.motor.service_gate` | `software/algorithms/src/motor/service_gate` | `calib @2` | GainGate 唯一写者；组窗不写主窗 |
-| `lib.motor.service_encoder` | `software/algorithms/src/motor/service_encoder` | `current @8` | MT6701 帧判据纯函数；不持有 SPI1 总线 |
-| `lib.joint.service_fsm` | `software/algorithms/src/joint/service_fsm` | `app state owner` | 迁移矩阵唯一实现 |
-| `lib.motor.config_motor` | `software/algorithms/src/motor/config_motor.rs` | `lib` | WK4310H 铭牌参数；每相/磁链换算 |
-| `lib.motor.config_policy` | `software/algorithms/src/motor/config_policy.rs` | `lib` | 策略阈值唯一来源；不复制 contracts |
-| `lib.motor.chain_foc` | `software/algorithms/src/motor/chain_foc` | `current @8` | Clarke/Park 纯函数；幅值不变 |
-| `lib.motor.chain_svpwm` | `software/algorithms/src/motor/chain_svpwm` | `current @8` | 输出边界 ClampedModulation；D_MAX 夹紧 |
-| `lib.motor.chain_sense` | `software/algorithms/src/motor/chain_sense` | `current @8` | 码到安培；不做零和修正 |
-| `lib.motor.chain_pid` | `software/algorithms/src/motor/chain_pid` | `current @8` | PI 状态唯一写者；抗饱和 |
-| `lib.motor.chain_current` | `software/algorithms/src/motor/chain_current` | `current @8` | dq 电流环；电压圆唯一限幅 |
-| `lib.joint.service_supervisor` | `software/algorithms/src/joint/service_supervisor` | `supervisor @7` | 心跳与超时锁存；clear 显式 |
-| `lib.motor.service_math` | `software/algorithms/src/motor/service_math.rs` | `lib` | 无 libm 数值；纯函数 |
-| `lib.joint.service_user` | `software/algorithms/src/lib.rs` | `lib` | crate 根与 re-export；无状态 |
-| `app.motor.task_bringup` | `software/firmware/src/bin/main.rs` | `bringup` | S0 探针；单 Board owner；无电机输出 |
-| `app.motor.service_trace` | `software/firmware/src/bin/trace/mod.rs` | `current @8` | 20 kHz 预/后触发录波环；原子槽单写者，锁存后只读 |
+
+| module id | path | owner | state | contract |
+|---|---|---|---|---|
+| `lib.joint.protocol_icd` | `software/contracts/src/joint/protocol_icd.rs` | `lib` | impl | 线协议布局与解码；只读、无策略 |
+| `lib.joint.protocol_wire` | `software/contracts/src/joint/protocol_wire.rs` | `lib` | impl | 线协议与内部类型换算的唯一入口；无策略 |
+| `lib.joint.protocol_events` | `software/contracts/src/joint/protocol_events.rs` | `lib` | impl | 队列事件与命令；单写者 |
+| `lib.joint.protocol_faults` | `software/contracts/src/joint/protocol_faults.rs` | `lib` | impl | 状态字位域；纯函数 |
+| `lib.joint.protocol_snapshot` | `software/contracts/src/joint/protocol_snapshot.rs` | `lib` | impl | seqlock；每个方向单写者 |
+| `lib.joint.protocol_fsm` | `software/contracts/src/joint/protocol_fsm.rs` | `lib` | impl | 状态机类型；不含迁移规则 |
+| `lib.motor.protocol_trust` | `software/contracts/src/motor/protocol_trust.rs` | `lib` | impl | Trust 枚举；Unknown=0 |
+| `lib.motor.protocol_types` | `software/contracts/src/motor/protocol_types.rs` | `lib` | impl | 物理量与定点类型；无策略 |
+| `lib.motor.config_hw` | `software/contracts/src/motor/config_hw.rs` | `lib` | impl | 器件事实与电气硬约束；编译期断言 |
+| `lib.joint.config_budget` | `software/contracts/src/joint/config_budget.rs` | `lib` | impl | 系统预算；只读 |
+| `lib.joint.service_contracts` | `software/contracts/src/lib.rs` | `lib` | impl | crate 根与 re-export；无状态 |
+| `bsp.motor.service_clock` | `software/bsp/src/motor/service_clock.rs` | `init` | impl | HSE 16M/PLL 170M 配置与读回；不匹配进 fault |
+| `bsp.motor.bus_pwm` | `software/bsp/src/motor/bus_pwm.rs` | `current @8` | impl | TIM1 20 kHz/500 ns；无 BKIN（BKE=0）；enable 检查 nFAULT |
+| `bsp.motor.bus_adc` | `software/bsp/src/motor/bus_adc.rs` | `current @8` | impl | ADC1/2/3 注入组 + TIM1_TRGO2；低边窗口由 MOE+CCxNE 实时判定 |
+| `bsp.motor.bus_encoder` | `software/bsp/src/motor/bus_encoder.rs` | `current @8` | scaffold | SPI1 总线唯一所有者；只搬字节，不判帧 |
+| `bsp.motor.service_dwt` | `software/bsp/src/motor/service_dwt.rs` | `current @8` | impl | DWT CYCCNT；先开 DCB.TRCENA，再使能计数器 |
+| `bsp.motor.service_timebase` | `software/bsp/src/motor/service_timebase.rs` | `init` | impl | TIM5 1 MHz，defmt 时间戳；32 位回绕 |
+| `bsp.motor.service_trace` | `software/bsp/src/motor/service_trace.rs` | `current @8` | impl | PB6/PB7 TP_SYNC、DAC1 残差/冻结；无锁无日志 |
+| `bsp.joint.service_board` | `software/bsp/src/lib.rs` | `init` | scaffold | Board 单实例；构造后 move 移交 |
+| `lib.motor.service_gate` | `software/algorithms/src/motor/service_gate` | `calib @2` | impl | GainGate 唯一写者；组窗不写主窗 |
+| `lib.motor.service_encoder` | `software/algorithms/src/motor/service_encoder` | `current @8` | impl | MT6701 帧判据纯函数；不持有 SPI1 总线 |
+| `lib.joint.service_fsm` | `software/algorithms/src/joint/service_fsm` | `app state owner` | impl | 迁移矩阵唯一实现 |
+| `lib.motor.config_motor` | `software/algorithms/src/motor/config_motor.rs` | `lib` | impl | WK4310H 铭牌参数；每相/磁链换算 |
+| `lib.motor.config_policy` | `software/algorithms/src/motor/config_policy.rs` | `lib` | impl | 策略阈值唯一来源；不复制 contracts |
+| `lib.motor.chain_foc` | `software/algorithms/src/motor/chain_foc` | `current @8` | impl | Clarke/Park 纯函数；幅值不变 |
+| `lib.motor.chain_svpwm` | `software/algorithms/src/motor/chain_svpwm` | `current @8` | impl | 输出边界 ClampedModulation；D_MAX 夹紧 |
+| `lib.motor.chain_sense` | `software/algorithms/src/motor/chain_sense` | `current @8` | impl | 码到安培；不做零和修正 |
+| `lib.motor.chain_pid` | `software/algorithms/src/motor/chain_pid` | `current @8` | impl | PI 状态唯一写者；抗饱和 |
+| `lib.motor.chain_current` | `software/algorithms/src/motor/chain_current` | `current @8` | impl | dq 电流环；电压圆唯一限幅 |
+| `lib.joint.service_supervisor` | `software/algorithms/src/joint/service_supervisor` | `supervisor @7` | impl | 心跳与超时锁存；clear 显式 |
+| `lib.motor.service_math` | `software/algorithms/src/motor/service_math.rs` | `lib` | impl | 无 libm 数值；纯函数 |
+| `lib.joint.service_user` | `software/algorithms/src/lib.rs` | `lib` | impl | crate 根与 re-export；无状态 |
+| `app.motor.task_bringup` | `software/firmware/src/bin/main.rs` | `bringup` | impl | S0 探针；单 Board owner；无电机输出 |
+| `app.motor.service_trace` | `software/firmware/src/bin/trace/mod.rs` | `current @8` | impl | 20 kHz 预/后触发录波环；原子槽单写者，锁存后只读 |
 <!-- module-registry:end -->
 
 ## 2. 工作区与文件树

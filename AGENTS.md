@@ -62,7 +62,7 @@ cargo xtask rel         # release 构建（验收构型）
 cargo xtask size        # .text/.rodata/.data/.bss + 镜像 vs memory.x
 cargo xtask arch        # 架构不变量 I1/I2/I3/I4/I7（纯 Rust：software/xtask/src/checks.rs，不经 bash）
 cargo xtask doc         # cargo doc --no-deps + RUSTDOCFLAGS=-D warnings（注释规范见 docs/archive/comment-style.md）
-cargo xtask hygiene     # H2 无主 TODO / H5 注释标记 / H4 文件架构 / H6 模块 ID 与 owner 注册表
+cargo xtask hygiene     # H2 无主 TODO / H5 注释标记 / H4 文件架构 / H6 模块 ID+owner+state 注册表
 cargo xtask tier        # H3：Tier B 路径有改动且无 HIL 证据时 FAIL（基线缺省 origin/main 或 $TIER_BASE）
 ```
 

@@ -219,6 +219,7 @@ struct ModuleRow {
     id: String,
     path: String,
     owner: String,
+    state: String,
     contract: String,
 }
 
@@ -256,6 +257,25 @@ fn check_module_registry() -> CheckResult {
         }
         if !Path::new(&row.path).exists() {
             hits.push(format!("{}：path 不存在：{}", row.id, row.path));
+        } else {
+            match todo_state(&row.path) {
+                Ok(has_todo) => match (row.state.as_str(), has_todo) {
+                    ("impl", true) => hits.push(format!(
+                        "{}：标 `impl` 但 {} 里仍有 `todo!()`",
+                        row.id, row.path
+                    )),
+                    ("scaffold", false) => hits.push(format!(
+                        "{}：标 `scaffold` 但 {} 里没有 `todo!()`",
+                        row.id, row.path
+                    )),
+                    ("impl" | "scaffold", _) => {}
+                    (other, _) => hits.push(format!(
+                        "{}：state 只能是 `impl` 或 `scaffold`（当前 `{other}`）",
+                        row.id
+                    )),
+                },
+                Err(e) => hits.push(format!("{}：无法扫描 {}：{e}", row.id, row.path)),
+            }
         }
         if !path_matches_id(&row.path, &row.id) {
             hits.push(format!(
@@ -288,8 +308,9 @@ fn check_module_registry() -> CheckResult {
     }
 
     if hits.is_empty() {
+        let scaffolds = rows.iter().filter(|row| row.state == "scaffold").count();
         Ok(format!(
-            "{} 个模块 / {scanned} 个文件，ID 与 owner 唯一",
+            "{} 个模块 / {scanned} 个文件，ID/owner/state 一致（scaffold {scaffolds} 个）",
             rows.len()
         ))
     } else {
@@ -324,15 +345,16 @@ fn parse_module_registry(doc: &str) -> Result<Vec<ModuleRow>, (String, Vec<Strin
             continue;
         }
         let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
-        if cells.len() != 4 {
-            hits.push(format!("注册表第 {} 行：需要 4 列", idx + 1));
+        if cells.len() != 5 {
+            hits.push(format!("注册表第 {} 行：需要 5 列", idx + 1));
             continue;
         }
         rows.push(ModuleRow {
             id: strip_ticks(cells[0]).to_string(),
             path: strip_ticks(cells[1]).to_string(),
             owner: strip_ticks(cells[2]).to_string(),
-            contract: strip_ticks(cells[3]).to_string(),
+            state: strip_ticks(cells[3]).to_string(),
+            contract: strip_ticks(cells[4]).to_string(),
         });
     }
 
@@ -346,6 +368,28 @@ fn parse_module_registry(doc: &str) -> Result<Vec<ModuleRow>, (String, Vec<Strin
         ));
     }
     Ok(rows)
+}
+
+/// 注册表 path（文件或目录）里是否有真正的 `todo!()`：文档注释里提到它不算。
+fn todo_state(path: &str) -> std::io::Result<bool> {
+    let root = Path::new(path);
+    let mut files = Vec::new();
+    if root.is_dir() {
+        collect_rs(root, &mut files)?;
+    } else {
+        files.push(root.to_path_buf());
+    }
+    for file in files {
+        let src = std::fs::read_to_string(&file)?;
+        let hit = src.lines().any(|line| {
+            let code = line.trim_start();
+            !code.starts_with("//") && code.contains("todo!(")
+        });
+        if hit {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn strip_ticks(s: &str) -> &str {
