@@ -2,7 +2,8 @@
 
 > 本文是文件级唯一版本（crate 划分、任务表、数据流），取代旧 `architecture.md` 的 §4–§6；
 > 硬件事实见 [hardware-facts.md](archive/hardware-facts.md) §2。需求编号见 [hardware-requirements.md](hardware-requirements.md)。
-> **状态标记**：树中标 `[计划]` 的条目尚未实现；实际落地状态见 [as-built.md](archive/as-built.md)。
+> **状态标记**：标 `[计划]`/`[未建]` 的条目没有代码；落地状态以 `.scratch/handoff.md` 为准，
+> 树与注册表不一致时 `cargo xtask hygiene`（H4/H6）会失败。
 > 本轮只定**文件与契约**，不落实现。
 
 ## 1. 七条不变量（机械化的写命令；未落地的显式标 `未落地`）
@@ -115,13 +116,13 @@ software/contracts/            # 零依赖、零 unsafe、host+target 双用（�
   src/motor/protocol_types.rs    #   Duty / DqTarget / RawSample3 / PhaseCurrent / Mode
   src/motor/config_hw.rs         #   器件事实与电气硬约束（D_MAX、采样窗口、MT6701 位宽）
 
-software/bsp/                  # 唯一 unsafe 层（包名 bsp）[T-012 clock/pwm 已实现]
-  src/lib.rs            #   Board 类型、init 构造后 move 移交、所有权表
+software/bsp/                  # 唯一 unsafe 层（包名 bsp）[clock/pwm/adc/dwt/timebase/trace 已实现]
+  src/lib.rs            #   Board 类型与所有权表；init 仍是 todo!()
   src/motor/mod.rs      #   motor 模块树
   src/motor/service_clock.rs   #   RCC 读回校验（embassy 配，bsp 验）
   src/motor/bus_pwm.rs         #   TIM1：6 路 + BDTR 死区（本板无 BKIN）
   src/motor/bus_adc.rs         #   OPAMP1/2/3 + ADC1/2/3 注入组；TIM1_TRGO2 触发
-  src/motor/bus_encoder.rs     #   SPI1 双 CS + MT6701 读帧
+  src/motor/bus_encoder.rs     #   [未实现] SPI1 双 CS 骨架；帧判据在 algorithms::motor::service_encoder
   src/motor/service_dwt.rs     #   CYCCNT 计时与剖面（先 DCB.TRCENA）
   src/motor/service_timebase.rs#   TIM5 @1 MHz；defmt 时间戳
   src/motor/service_trace.rs  #   PB6/PB7 TP_SYNC + DAC1_OUT1/2 遥测
@@ -132,7 +133,7 @@ software/bsp/                  # 唯一 unsafe 层（包名 bsp）[T-012 clock/p
   src/joint/service_gpio.rs    #   [计划] PWM/CS/STROBE/LED 的静态配置
   src/joint/service_fault.rs   #   [计划] HardFault/panic 的裸入口（第二处 unsafe）
 
-software/system/               # 服务层（包名 system），forbid(unsafe)
+software/system/               # 服务层（包名 system）[未建]，forbid(unsafe)
   src/lib.rs
   src/log.rs            #   try_log：无锁环，满则丢；flush 只在最低优先级
   src/time.rs           #   TIM5 @1 MHz + 64 位溢出扩展（TIM2 归 embassy 时基）
@@ -176,22 +177,22 @@ software/algorithms/                 # 纯算法（包名 algorithms），no_std
 
 software/app/                  # 装配（包名 app，bin）[未建]
   src/main.rs           #   #[app(device = ..., peripherals = false)]
-  src/app/joint/service_init.rs    #   上电顺序：时钟校验→自检→外设→任务
-  src/app/joint/task_io.rs         #   prio 1：executor.run()
-  src/app/joint/service_fault.rs   #   #[panic_handler] + HardFault
-  src/app/joint/config_sections.rs #   #[link_section] 保留段与 magic
-  src/app/motor/task_current.rs    #   prio 8：20 kHz 电流环
-  src/app/motor/task_calib.rs      #   prio 2：软件 dispatcher
-  src/app/motor/task_can.rs        #   prio 5：CAN
-  src/app/motor/task_telemetry.rs  #   prio 5：遥测
+  src/joint/service_init.rs    #   上电顺序：时钟校验→自检→外设→任务
+  src/joint/task_io.rs         #   prio 1：executor.run()
+  src/joint/service_fault.rs   #   #[panic_handler] + HardFault
+  src/joint/config_sections.rs #   #[link_section] 保留段与 magic
+  src/motor/task_current.rs    #   prio 8：20 kHz 电流环
+  src/motor/task_calib.rs      #   prio 2：软件 dispatcher
+  src/motor/task_can.rs        #   prio 5：CAN
+  src/motor/task_telemetry.rs  #   prio 5：遥测
 
-software/firmware/               # 现有探针（独立 workspace，单 bin main，无电机代码）
-  src/bin/main.rs       #   S0 bring-up：时钟读回 / Board 所有权 / PWM 安全关断 / trace HIL
+software/firmware/               # 现有固件（独立 workspace，单 bin main；app 层未建前的宿位）
+  src/bin/main.rs       #   20 kHz current task + 初始化装配 + RTT 监视（HIL 已过）
   src/bin/trace/mod.rs  #   TraceFrame 16 B + 512/1536 预/后触发环 + stride + DATA 行
 ```
 
-> **一处修正**：async 任务的**外壳**放 `software/app/src/tasks/io.rs`，业务函数放 `algorithms`。
-> 若把 `#[embassy_executor::task]` 写进 `algorithms`，user 就依赖了执行器，I1 与 I2 同时破。
+> **一处修正**：async 任务的**外壳**放 `software/app/src/joint/task_io.rs`，业务函数放 `algorithms`。
+> 若把 `#[embassy_executor::task]` 写进 `algorithms`，`algorithms` 就依赖了执行器，I1 与 I2 同时破。
 
 ## 3. `contracts`：三个模块的分工
 

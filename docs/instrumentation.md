@@ -4,17 +4,19 @@
 > 引脚唯一来源：[`hardware-requirements.md`](hardware-requirements.md) §3.1、§4.3、§5。
 > 工程红线：[`../AGENTS.md`](../AGENTS.md) PRE-02/PRE-04/PRE-05。
 
-## 1. 引脚与信号
+## 1. 信号与语义
 
-| 信号 | 引脚 | 方向/电平 | 语义 |
-|---|---|---|---|
-| `TP_SYNC_LOOP` | PB6 | 推挽 3.3 V | 20 kHz 控制 ISR 进入拉高、退出拉低；示波器/LA 的周期起点 |
-| `TP_SYNC_FREEZE` | PB7 | 推挽 3.3 V | 校准冻结期间高；与 DAC1_OUT2 同相，供 LA 抓冻结窗口 |
-| `DAC1_OUT1` / TP1 | PA4 | 0…2.49 V | 残差 `r_k`；0 A 固定 2048（约 1.25 V） |
-| `DAC1_OUT2` / TP2 | PA5 | 0 / 2.49 V | 正常 0；冻结瞬间 4095，示波器 CH2 上升沿单次触发 |
+| 信号 | 方向/电平 | 语义 |
+|---|---|---|
+| `TP_SYNC_LOOP` | 推挽 3.3 V | 20 kHz 控制 ISR 进入拉高、退出拉低；示波器/LA 的周期起点 |
+| `TP_SYNC_FREEZE` | 推挽 3.3 V | 校准冻结期间高；与 DAC1_OUT2 同相，供 LA 抓冻结窗口 |
+| `DAC1_OUT1` / TP1 | 0…2.49 V | 残差 `r_k`；0 A 固定 2048（约 1.25 V） |
+| `DAC1_OUT2` / TP2 | 0 / 2.49 V | 正常 0；冻结瞬间 4095，示波器 CH2 上升沿单次触发 |
 
-PB6/PB7 在网表上仍叫 `USART3_TX/RX`，但**本季不启用 USART3**；不要再把这两个脚配成 UART AF。
-调试日志只走 RTT（SWD 的 SWO 也不可用，PB3 是 SPI1_SCK）。
+脚位只在 §3.1 表里（PRE-10）；本表只给信号语义。
+
+两个 TP_SYNC 脚在网表上仍叫 `USART3_TX/RX`，但**本季不启用 USART3**；不要再把它们配成 UART AF。
+调试日志只走 RTT：SWO 不可用，其脚已分配给 SPI1_SCK（见 §3.1 表）。
 
 ### 1.1 DAC 标度
 
@@ -97,7 +99,7 @@ DATA,k,ia_raw,ib_raw,ic_raw,r_lsb,flags
 - 前缀固定 `DATA,`；无空格；`grep '^DATA,' run.log > data.csv` 直接得到 CSV。
 - `ia_raw/ib_raw/ic_raw` 是 12 bit ADC 原始码，不是安培；在主机用零位/相对增益换算。
 - `r_lsb` 是残差 LSB（有符号），DAC 标度前使用。
-- `flags`：bit0=`FROZEN`，bit7=`SELFTEST`，其余 0。
+- `flags`：bit0=`FROZEN`；其余位保留，写 0（现树只定义 `TRACE_FLAG_FROZEN`）。
 - 帧固定 16 B（`TraceFrame` 编译期 `size_of == 16`）。
 
 ### 4.2 预/后触发窗口
@@ -123,7 +125,7 @@ DATA,k,ia_raw,ib_raw,ic_raw,r_lsb,flags
 - 标定任务调用 `TRACE.trigger()`；只有第一次生效。
 - 导出任务先看 `summary().locked`，再 `TRACE.dump(limit)`；`limit=usize::MAX` 导出完整窗口。
 - 锁存后保持停止；重新布防必须由已停止的写者/写者自己执行，当前不在 20 kHz 写者运行时自动 rearm。
-- HIL 自检帧 flags=0x81；真实数据应为 0x00/0x01（bit0=`FROZEN`）。
+- 下面日志里的 `flags=129`（0x81）来自旧自检代码；现树只有 bit0=`FROZEN`，真实数据为 0x00/0x01。
 
 ## 5. 所有权与热路径
 
@@ -178,14 +180,14 @@ cargo xtask hil --enable-zero
 2. `probe-rs run` 烧录并从复位开始抓 RTT（不会漏掉启动日志）
 3. 同时把解码后的日志写入 `.scratch/hil/run.log`
 
-示波器固定接法：
+示波器固定接法（通道 → 脚位见 HR §5 测试点表）：
 
-| 通道 | 测试点 | 信号 |
-|---|---|---|
-| CH1 | PA4 / TP1 | DAC1_OUT1 残差（0 A ≈ 1.25 V） |
-| CH2 | PA5 / TP2 | DAC1_OUT2 冻结指示（0 / 2.49 V） |
-| CH3 | PB6 | TP_SYNC_LOOP（20 kHz ISR 包络） |
-| CH4 | PB7 | TP_SYNC_FREEZE（冻结窗口） |
+| 通道 | 信号 |
+|---|---|
+| CH1 | `DAC1_OUT1` 残差（0 A ≈ 1.25 V，TP1） |
+| CH2 | `DAC1_OUT2` 冻结指示（0 / 2.49 V，TP2） |
+| CH3 | `TP_SYNC_LOOP`（20 kHz ISR 包络） |
+| CH4 | `TP_SYNC_FREEZE`（冻结窗口） |
 
 触发：CH2 上升沿单次；先 10 ms/div 看冻结窗口，再切 20 µs/div 看 20 kHz 循环。
 
@@ -195,8 +197,8 @@ cargo xtask hil --enable-zero
 cargo xtask rtt
 ```
 
-复位最早期用 **PB7 拉高** 作为“CPU 已进入 `init`”标记（`Trace::init` 后恢复低）。若 PB7 也低，说明还没走到固件 init；先查 NRST/BOOT0/调试器是否把核停住。
-若复位后 **PB7 常高、TP1 仍为 0 V**，停在 embassy 时钟配置或 100 ms 时钟校验；TP1 有 1.25 V、TP2/PB7 常高、PB6 没有 20 kHz，则是 wake/ADC/零位/门控故障：
+复位最早期把 **`TP_SYNC_FREEZE` 拉高** 作为"CPU 已进入 `init`"标记（`Trace::init` 后恢复低）。若它也为低，说明还没走到固件 init；先查 NRST/BOOT0/调试器是否把核停住。
+若复位后 **`TP_SYNC_FREEZE` 常高、TP1 仍为 0 V**，停在 embassy 时钟配置或 100 ms 时钟校验；TP1 有 1.25 V、TP2 与 `TP_SYNC_FREEZE` 常高、`TP_SYNC_LOOP` 没有 20 kHz，则是 wake/ADC/零位/门控故障：
 `Pwm::wake`（nFAULT 100 ms 仍低）、ADC 校准/零位或门控零位失败都会走这条可见故障码。
 RTT 会给出对应的 `driver=wake fail` / `adc=bad` / `adc0=bad` / `gate=bad`。
 

@@ -131,8 +131,9 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R8 | `deadtime_dtg` 运行期 `assert!` → 编译期常量 | B（Tier B） | (a) `const DEADTIME_DTG: u8 = deadtime_dtg();`；(b) 保持现状 | (a) |
 | R9 | `main.rs` 5 处 `trace.freeze(); defmt::error!; loop spin` 故障停机副本 | B（Tier B） | (a) 提取 `halt_with_fault(code)` 单点；(b) 留在 `init` 内联 | (a) |
 | R10 | 文档级引脚 lint（`P[A-D]\d+` 只许出现在 HR §3.1） | A | (a) 加 hygiene 规则 + 白名单；(b) 不加，靠 PRE-10 人工检查 | (b) 先评估误报率 |
+| R11 | firmware/bsp 注释级纠偏（`TRACE_FLAG_SELFTEST` 悬空 link、`bus_pwm.rs:101` 的 PB10 措辞） | B（Tier B，注释级） | (a) 与 R8/R9 同批做，一次 HIL 签收；(b) 单独做并标 `PENDING_HIL` | (a) |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；R3 hold（§9-1）；R4/R7–R10 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4，见 R10 的机器化缺口）；R3 hold（§9-1）；R4/R7–R11 待做。
 
 ### 9. 待确认（人）
 
@@ -208,6 +209,27 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：未加机器检查（`P[A-D]\d+` 在代码注释里大量出现，误报高，见 R10）。
 - 验证：`test`/`check`/`hygiene`/`doc` 全 PASS（提交回执）。
 - 未决项：NTC 通道（HR §8-9）；R10 引脚 lint 误报率；`Board::init`。
+
+---
+
+## 轮次 4：文档只写当前树（architecture / instrumentation）
+
+- 熵源：§6「文档状态」行；§6「PRE-10 引脚唯一真源」行
+- 调用方核实：
+  - `docs/software-architecture.md:5` 把落地状态指向 `archive/as-built.md`，而该文件仍写 `adc`/`dwt` 是 `todo!()`（`archive/as-built.md:13`）。
+  - §2 的 bsp 状态行停在 T-012（漏 adc/dwt/timebase/trace）；`bus_encoder` 写成"SPI1 双 CS + MT6701 读帧"，实际是 `todo!()` 骨架（`bsp/src/motor/bus_encoder.rs:9`）。
+  - §2 的 app crate 路径写成 `src/app/joint/...`，与四轴投影 `<crate>/src/<domain>/<role>.rs` 不符（7 行）。
+  - `docs/instrumentation.md` §1/§7 复制 8 处引脚；§4.1 声称 `flags` bit7=`SELFTEST`，而代码只有 `TRACE_FLAG_FROZEN`（`trace/mod.rs:47`），`TRACE_FLAG_SELFTEST` 只存在于同一行的 doc 注释里。
+- 选定方案：文档只写"当前树 + 信号名"；脚位一律回 HR §3.1；flags 只写代码里存在的位；历史 `0x81` 标注为旧自检。
+- 放弃方案：
+  - (a) 顺带修 `trace/mod.rs` 的悬空 intra-doc link —— firmware 属 Tier B，注释级改动也要 HIL 证据，留到 R11 与 R8/R9 同批；
+  - (b) 写脚本比对文档 flags 位与代码 —— 单点字符串，维护成本高于收益。
+- 行为基线：纯文档；门禁输出不变。
+- 迁移完成：architecture §2 的 bsp/system/app/firmware 四块状态、app 路径、旧 crate 名；instrumentation §1/§4.1/§7 与排障段落的引脚/flag 表述。
+- 删除的旧实现：`as-built.md` 状态指针；instrumentation 的 8 处引脚副本与 `SELFTEST` 声明。
+- 防回归约束：无（自然语言里的状态/引脚无法低成本机器校验；PRE-10 仍是人工 grep，见 R10）。
+- 验证：`test`/`check`/`hygiene`/`doc` PASS（提交回执）。
+- 未决项：`trace/mod.rs:50` 悬空 link（R11）；`bus_pwm.rs:101` 的 PB10 措辞（R11）。
 
 ---
 
