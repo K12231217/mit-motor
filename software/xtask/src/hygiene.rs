@@ -381,10 +381,9 @@ fn todo_state(path: &str) -> std::io::Result<bool> {
     }
     for file in files {
         let src = std::fs::read_to_string(&file)?;
-        let hit = src.lines().any(|line| {
-            let code = line.trim_start();
-            !code.starts_with("//") && code.contains("todo!(")
-        });
+        let hit = src
+            .lines()
+            .any(|line| crate::fs::code_only(line).contains("todo!("));
         if hit {
             return Ok(true);
         }
@@ -584,6 +583,11 @@ mod tests {
         let mention = dir.join("mention.rs");
         std::fs::write(&mention, "//! still todo!() here\npub fn f() {}\n").expect("write");
         assert!(!todo_state(mention.to_str().expect("utf-8 path")).expect("scan"));
+
+        // 行尾注释里的 `todo!()` 同样不算桩。
+        let trailing = dir.join("trailing.rs");
+        std::fs::write(&trailing, "pub fn f() {} // 曾用 todo!() 占位\n").expect("write");
+        assert!(!todo_state(trailing.to_str().expect("utf-8 path")).expect("scan"));
 
         let stub = dir.join("stub.rs");
         std::fs::write(&stub, "pub fn f() {\n    todo!()\n}\n").expect("write");

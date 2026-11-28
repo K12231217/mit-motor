@@ -270,9 +270,16 @@ fn check_isr_purity() -> Outcome {
     };
     let lines: Vec<&str> = text.lines().collect();
     let Some((start, end)) = isr_body(&lines) else {
+        let anchored = lines
+            .iter()
+            .any(|line| line.contains("#[task(binds = TIM1_UP"));
         return Outcome::Fail {
-            summary: format!("{SOURCE} 里找不到 `#[task(binds = TIM1_UP…)] fn current`"),
-            details: vec!["锚点改名后必须同步改本检查，不能降级成 N/A".to_string()],
+            summary: if anchored {
+                format!("{SOURCE}：TIM1 ISR 的花括号不配对，无法确定扫描区间")
+            } else {
+                format!("{SOURCE} 里找不到 `#[task(binds = TIM1_UP…)] fn current`")
+            },
+            details: vec!["锚点改名或函数体失衡时，本检查必须 FAIL，不能降级成 N/A".to_string()],
         };
     };
 
@@ -292,8 +299,9 @@ fn check_isr_purity() -> Outcome {
 
     if hits.is_empty() {
         Outcome::Pass(format!(
-            "{SOURCE}:{}–{end} 的 TIM1 更新 ISR 无 defmt/await/锁/解包",
-            start + 1
+            "{SOURCE}:{}–{} 的 TIM1 更新 ISR 无 defmt/await/锁/解包",
+            start + 1,
+            end + 1
         ))
     } else {
         Outcome::Fail {
@@ -316,7 +324,7 @@ fn isr_body(lines: &[&str]) -> Option<(usize, usize)> {
     let mut depth = 0i32;
     let mut opened = false;
     for (offset, line) in lines[start..].iter().enumerate() {
-        for ch in strip_strings(line).chars() {
+        for ch in crate::fs::code_only(line).chars() {
             match ch {
                 '{' => {
                     depth += 1;
@@ -331,29 +339,6 @@ fn isr_body(lines: &[&str]) -> Option<(usize, usize)> {
         }
     }
     None
-}
-
-/// 去掉字符串字面量，避免 `"{"`/`"}"` 干扰花括号配对。
-fn strip_strings(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
-    let mut in_str = false;
-    let mut escaped = false;
-    for ch in line.chars() {
-        if in_str {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_str = false;
-            }
-        } else if ch == '"' {
-            in_str = true;
-        } else {
-            out.push(ch);
-        }
-    }
-    out
 }
 
 /// I7 —— 状态迁移只有一处：`MotorState` 只允许在 `fsm.rs`、其测试模块与 crate 根出现。
@@ -436,7 +421,7 @@ mod tests {
     //! 门禁的判据本身也要有反例：I4 的锚点或花括号配对写错时，
     //! 正确的代码会 PASS、错误的代码也会 PASS，这比没有检查更危险。
 
-    use super::{isr_body, strip_strings};
+    use super::isr_body;
 
     /// 外层是真实的 `#[task]` 锚点，`monitor` 里的 `defmt` 必须落在区间之外。
     const SNIPPET: &[&str] = &[
@@ -478,11 +463,17 @@ mod tests {
     }
 
     #[test]
-    fn strip_strings_hides_braces_inside_literals() {
-        assert_eq!(
-            strip_strings("let s = \"{\"; let t = 1;"),
-            "let s = ; let t = 1;"
-        );
-        assert_eq!(strip_strings("/* { */ let x = 1;"), "/* { */ let x = 1;");
+    fn isr_body_ignores_braces_in_comments() {
+        let snippet = [
+            "    #[task(binds = TIM1_UP_TIM16)]",
+            "    fn current(_cx: current::Context) {",
+            "        // 保持 } 配对（注释里的花括号不算）",
+            "        let _ = 1;",
+            "    }",
+            "    #[task(priority = 1)]",
+            "    async fn monitor(_cx: monitor::Context) {}",
+        ];
+        let (start, end) = isr_body(&snippet).expect("comment braces must not close the body");
+        assert_eq!((start, end), (1, 4));
     }
 }
