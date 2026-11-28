@@ -272,78 +272,44 @@ PA15、PC10/11/12、PD2、PB7、PB9），缺口不在引脚余量，而在**电�
 > HR-801/802 的取舍：没有 CORDIC/FMAC 也能跑，但 170 MHz 下 25 µs 环预算与 10 ms 标定任务会同时吃紧。
 > 先按"有它们"设计，再用 DWT 证明余量；证明不了就降 PWM 频率，而不是砍标定。
 
-## 3. 引脚分配（LQFP64，最终版）
+## 3. 引脚分配
 
-`沿用` = 与 PCB14 同脚同功能；`改` = 与 PCB14 不同（原因写在第 5 列）；`新增` = PCB14 上不存在。
-V2 与 PCB14 的差别集中在模拟前端（为片内 OPAMP 让路）、6 路 PWM、CAN/UART/BKIN 的挪位——
-**"同封装可直接换料"只对"能不能跑起来"成立，不代表 V2 能沿用 PCB14 的走线。**
+引脚唯一真源是 §3.1 的**一张表**。两处一手材料，缺一不可：
 
-> **2026-11-27 最新网表 `hardware/pcb/Netlist_Schematic14_1_2026-11-27.tel` 覆盖了本节的
-> nSLEEP/nFAULT/BKIN、模拟前端、CAN/UART、编码器片选与测试点。以 §3.1 为准；下表是
-> V2 需求历史，冲突行不再使用。**
+- `hardware/pcb/Netlist_Schematic14_1_2026-11-27.tel`（U1 = G474RBT6 LQFP64）：网络名与 U1 脚号；
+- `docs/DS_stm32g474rb/Pinouts_and_pin_description.md` Table 12（LQFP64 列）：脚号 → PXn 与复用/附加功能。
 
-| 功能 | 引脚 | Pin | PCB14 | G474RBT6 上确认 | V2 动作 |
-|---|---|---|---|---|---|
-| PWM_HS A/B/C | PA8 / PA9 / PA10 | 42 / 43 / 44 | 已接（同名）| TIM1_CH1/2/3 | 沿用 |
-| PWM_LS A/B/C | **PB13 / PB14 / PB15** | 35 / 36 / 37 | PCB14: PA7/PB14/PB15（当时当 EN）| TIM1_CH1N/2N/3N | **改**：PA7 让给 SOB，PB13 让出 CAN |
-| SOA / SOB / SOC | **PA1 / PA7 / PB0** | 13 / 21 / 24 | PCB14: PA2/PC4/PB1 | ADC1_IN2 / ADC2_IN4 / ADC3_IN12 + OPAMP1/2/3_VINP + COMP1/2/4_INP | **改**：为片内 OPAMP 跟随器让路 |
-| EXT_I_REF（ADC4）| **PB12** | 34 | PCB14: FDCAN2_RX | ADC4_IN3 | 新增（HR-211）；LQFP64 的 ADC4 只有 PB12/14/15 |
-| VBUS_ADC | PA3 | 17 | 已接 | ADC1_IN4 + COMP2_INP | 沿用 |
-| NTC | PC0 | 8 | 已接 | ADC1_IN6 | 沿用 |
-| TIM1_BKIN | **PB10** | 30 | PCB14: PA6 | TIM1_BKIN | **改**：PA6 留给 OPAMP2_VOUT；PA11 是 BKIN2 且是 USB_DM |
-| nFAULT | **PB10 + PC9**（同网络）| 30 / 41 | PCB14: PB0 | BKIN + GPIO 读 | **改**：必须同时可读，否则故障源不可知 |
-| nSLEEP | PC5 | 23 | 已接 | GPIO，10 kΩ 下拉 | 沿用 |
-| SPI1_SCK / MISO | PB3 / PB4 | 56 / 57 | 已接 | SPI1 | 沿用（**不用 MOSI**，MT6701 只读 3 线）|
-| ENC1_CS / ENC2_CS | **PB7 / PB9** | 60 / 62 | PCB14: PB5/PB6 | GPIO | **改**：PB5/PB6 让给 CAN |
-| FDCAN2_RX / TX | **PB5 / PB6** | 58 / 59 | PCB14: PB12/PB13 | FDCAN2 | **改** |
-| USART3_TX / RX | **PC10 / PC11** | 52 / 53 | PCB14: PB10/PB11 | USART3 | **改** |
-| USB_DM / DP | PA11 / PA12 | 45 / 46 | 已接 | USB_FS | 沿用 + ESD |
-| SWD | PA13 / PA14 | 49 / 50 | 已接 | SWD | 沿用 + NRST(7) |
-| BOOT0 | PB8 | 61 | 已接 | BOOT0 | 沿用 + 10 kΩ 下拉 + 跳线 |
-| HSE | PF0 / PF1 | 5 / 6 | 已接 | OSC_IN/OUT | 沿用（16 MHz 或 24 MHz 均可，不影响 USB）|
-| STROBE1/2/3 | PC6 / PC7 / PC8 | 38 / 39 / 40 | **网表里无网络** | TIM8_CH1/2/3、HRTIM1_CHF1/CHF2/CHE1 | 新增引出（HR-501）|
-| DAC 遥测 | PA4 / PA5 | 18 / 19 | 空闲 | DAC1_OUT1/2 | V2 历史；最新 T-014：OUT1 残差 / OUT2 冻结（HR-803） |
-| COMP2_OUT | PA2 | 14 | 空闲 | COMP2_OUT | 新增 TP（HR-808）|
-| 状态 LED | PB2 | 26 | 空闲 | GPIO | V2 历史；最新网表无 MCU LED（HR-505）|
-| 母线分流（选装）| PA0 | 12 | 空闲 | ADC1_IN1/ADC2_IN1 | 预留（HR-210）|
-| 保持空置 | PA6、PB1 | 20 / 25 | — | OPAMP2_VOUT / OPAMP3_VOUT | 便于日后关掉 OPAMP 直接接 ADC |
-| 其他空闲 | PA15, PB11, PC12, PC13, PC14, PC15, PC1, PC2, PC3, PD2 | 51,33,54,2,3,4,9,10,11,55 | 空闲 | — | 留焊盘（HR-606）|
+V2 需求表（与 PCB14 的逐脚差异、曾交给外包的版本）已移入
+[`archive/pin-map-v2.md`](archive/pin-map-v2.md)；它与本表冲突的行一律作废，且不再维护。
 
-> **§3 表核对基准**：本表已按 `docs/DS_stm32g474rb/Pinouts_and_pin_description.md` Table 12 逐脚核对
-> （AF 与 additional functions 均查），2026-11-16。**任何引脚改动必须重核该表；散文与表冲突时以本表为准。**
+### 3.1 引脚表（Schematic14_1 网表 + DS Table 12，2026-11-28 复核）
 
-**核对结论**：PCB14 在用的 29 个 MCU 信号（不含 NRST 与只有网络标签的 PC1），在 `STM32G474R(B-C-E)Tx.xml` 上逐脚比对无功能丢失，
-所以"换料能跑"成立；但 V2 的功能分配另有 6 处改动（模拟前端、6 路 PWM、CAN、UART、BKIN、ADC4），
-**PCB14 的走线不能直接沿用**。上表是交给外包的唯一版本。
+| 功能 | 引脚 | U1 脚 | 网表网络 | DS Table 12 复用/附加功能 |
+|---|---|---|---|---|
+| PWM_HS A/B/C | PA8 / PA9 / PA10 | 42/43/44 | `PWM_AH/BH/CH` | TIM1_CH1/2/3；PA8 另有 ADC5_IN1、OPAMP5_VOUT，PA9 ADC5_IN2，PA10 PVD_IN |
+| PWM_LS A/B/C | PB13 / PB14 / PB15 | 35/36/37 | `PWM_AL/BL/CL` | TIM1_CH1N/2N/3N；PB13 ADC3_IN5，PB14 ADC4_IN4/ADC1_IN5，PB15 ADC4_IN5/ADC2_IN15 |
+| nSLEEP | PC7 | 39 | `NSLEEP` | 无模拟复用；输出高有效（`.ioc` 写 PC8 的是旧版） |
+| nFAULT | PC8 | 40 | `NFAULT` | 无模拟复用；开漏低有效（`.ioc` 写 PC7 的是旧版） |
+| SOC 采样（OPA1） | PA3 | 17 | `OPA1` | ADC1_IN4、COMP2_INP、OPAMP1_VINM/VINP、OPAMP5_VINM |
+| SOB 采样（OPA2） | PA7 | 21 | `OPA2` | ADC2_IN4、COMP2_INP、OPAMP1_VINP、OPAMP2_VINP |
+| SOA 采样（OPA3） | PB0 | 24 | `OPA3` | ADC3_IN12/ADC1_IN15、COMP4_INP、OPAMP2_VINP、OPAMP3_VINP |
+| VBUS_ADC | PB11 | 33 | `VBUS_ADC` | ADC12_IN14、COMP6_INP、OPAMP4_VINP |
+| DAC1_OUT1 / OUT2 | PA4 / PA5 | 18/19 | `DAC1_OUT1`→TP1、`DAC1_OUT2`→TP2 | DAC1_OUT1/2；PA4 另有 ADC2_IN17，PA5 ADC2_IN13 |
+| SPI1_SCK / MISO | PB3 / PB4 | 56/57 | `SPI1_SCK` / `SPI1_MISO` | SPI1_SCK / SPI1_MISO；两片 MT6701 共用 MISO，不要 MOSI |
+| ENC1_CS / ENC2_CS | PC12 / PC10 | 54/52 | `ENC1_CS` / `ENC2_CS` | 纯 GPIO |
+| FDCAN1_RX / TX | PA11 / PA12 | 45/46 | `CAN_RX` / `CAN_TX` | FDCAN1_RX / FDCAN1_TX；同脚还有 USB_DM/DP，本板无 USB 连接器 |
+| USART3_TX / RX | PB6 / PB7 | 59/60 | `USART3_TX`→CN1.1、`USART3_RX`→CN1.2 | 本季不启用 USART3，配推挽：PB6=TP_SYNC_LOOP、PB7=TP_SYNC_FREEZE（HR-510） |
+| BOOT0 | PB8 | 61 | `BOOT0` | 10 kΩ 下拉 + 跳线 |
+| SWDIO / SWCLK | PA13 / PA14 | 49/50 | `SWDIO` / `SWCLK` | SWD；复位按键 SW1 接 NRST（脚 7，PG10-NRST） |
+| HSE | PF0 / PF1 | 5/6 | `OSC_IN` / `OSC_OUT` | 16 MHz 晶振 X1 |
+| VREF+ | VREF+ | 28 | `VREF+` | 供 OPAMP 偏置与 ADC 参考 |
 
-**引脚层面的两个附带发现**（来自网表，不是原理图）：
-- PC6/PC7/PC8 在网表里没有任何网络——architecture §9 写的"预留 strobe"在 PCB14 上并不存在。
-- PC1 只有一个孤立网络名 `ADC12_IN7`，没有其它连接，属未完成设计。
+**网表里没有连接**（固件不得假设其存在）：TIM1_BKIN、STROBE1/2/3、EXT_I_REF（ADC4）、
+COMP2_OUT、母线分流（PA0）、MCU 状态 LED、USB 连接器、OPAMP4/5/6 引出。
 
-时钟树：HSE 16 M → PLL M=4/N=85/P=2 ⇒ 170 MHz（boost）；ADC 42.5 MHz；
-USB 48 MHz 由 HSI48+CRS；CAN FD 位定时由 HSE 派生。
-
-### 3.1 最新网表覆盖（Schematic14_1，2026-11-27）
-
-来源：`hardware/pcb/Netlist_Schematic14_1_2026-11-27.tel`（U1 = G474RBT6 LQFP64）。未列出的
-PWM_HS、BOOT0、SWD、HSE 与上表一致；下列行**覆盖上表**。
-
-| 功能 | 最新引脚 | U1 脚 | 网络 / 备注 |
-|---|---|---|---|
-| PWM_LS A/B/C | PB13 / PB14 / PB15 | 35/36/37 | `PWM_AL/BL/CL`（与原 V2 表一致；PCB14 的 LS A=PA7 不适用） |
-| nSLEEP | **PC7** | 39 | `NSLEEP`，输出高有效；`.ioc` 写成 PC8 是旧版 |
-| nFAULT | **PC8** | 40 | `NFAULT`，开漏低有效，上拉；`.ioc` 写成 PC7 是旧版 |
-| TIM1_BKIN | **未引出** | — | 网表无 `BKIN` 网络；`BKE` 必须为 0，硬件过压 break 缺口 |
-| 相电流 OPAMP 输入 | OPA1=SOC→**PA3**；OPA2=SOB→**PA7**；OPA3=SOA→**PB0** | 17/21/24 | **A/C 相与 OPAMP 通道交叉**；4.99 kΩ 偏置网络 |
-| VBUS_ADC | **PB11** | 33 | 原 V2 表的 PA3 不再使用 |
-| DAC1_OUT1 / OUT2 | PA4 / PA5 | 18/19 | TP1 残差 / TP2 冻结指示；只连外部脚，不进内部采样链（HR-803） |
-| TP_SYNC_LOOP / FREEZE | **PB6 / PB7** | 59/60 | 网表网络名仍为 USART3；本季**不启用 USART3**，配成推挽 GPIO（HR-510） |
-| FDCAN / USB | PA11 / PA12 | 45/46 | 网表为 `CAN_RX/TX`（FDCAN1）；**本板无 USB** |
-| ENC1_CS / ENC2_CS | PC12 / PC10 | 54/52 | 原 V2 表的 PB7/PB9 不适用 |
-| STROBE1/2/3 | **未引出** | — | 原 V2 表的 PC6/PC7/PC8 不适用；PC7/PC8 已改 nSLEEP/nFAULT |
-| 状态 LED | **无 MCU LED** | — | 网表只有电源指示 LED1；PB2 不驱动，状态走 RTT（HR-505） |
-| EXT_I_REF / COMP2_OUT / OPAMP4 | **未引出** | — | 最新网表没有这些网络 |
-| NTC | U1.11 / `ADC12_IN6` | 11 | 网表网络名；MCU 引脚名以封装表复核 |
+**待确认（网表与 DS 冲突，未裁决）**：网络 `ADC12_IN6` 只连 U1.11 一个节点，没有分压或热敏电阻；
+且 LQFP64 脚 11 是 PC3，其附加功能为 `ADC12_IN9`/`OPAMP5_VINP`，没有 `ADC12_IN6`。
+也就是说本版网表上 NTC 既未接、通道名也对不上，需原理图/实物确认后才能写进需求。
 
 ## 4. HIL 探针（2026-11-27 网表）
 
@@ -465,6 +431,9 @@ LED 只能看粗状态，**判据一律以状态字为准**；示波器/LA 用 S
 7. **内部 COMP 是否承担过压判定**：若 RM0440 确认 COMP 输出可直连 TIM1_BKIN，外部 TLV7021 可删；
    但上电到固件配置完成之间无保护，建议保留外部器件作为默认硬保护（HR-808）。
 8. **论文题目是否随主控更新**：现题目写的是 STM32G491，与 G474RBT6 不一致；这是教务层面的事，需先确认。
+9. **NTC 通道**：2026-11-27 网表里 `ADC12_IN6` 只连 U1.11 一个节点，没有分压/热敏电阻；LQFP64 脚 11 是
+   PC3，附加功能为 `ADC12_IN9`/`OPAMP5_VINP`，不存在 `ADC12_IN6`。要么补上 NTC 与分压并改用 PC3 的
+   `ADC12_IN9`，要么删掉 HR-405 的 NTC 依赖；在确认前不得把 NTC 当可用输入。
 
 ## 9. 投板前检查清单
 

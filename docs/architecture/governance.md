@@ -130,8 +130,9 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R7 | I5/I6 落地 | B | (a) 队列有运行期调用方后再加检查与 `dropped` 计数；(b) 先写 `isr_cycles` 预算表 + 上限检查 | (b) 先做 I6 预算 |
 | R8 | `deadtime_dtg` 运行期 `assert!` → 编译期常量 | B（Tier B） | (a) `const DEADTIME_DTG: u8 = deadtime_dtg();`；(b) 保持现状 | (a) |
 | R9 | `main.rs` 5 处 `trace.freeze(); defmt::error!; loop spin` 故障停机副本 | B（Tier B） | (a) 提取 `halt_with_fault(code)` 单点；(b) 留在 `init` 内联 | (a) |
+| R10 | 文档级引脚 lint（`P[A-D]\d+` 只许出现在 HR §3.1） | A | (a) 加 hygiene 规则 + 白名单；(b) 不加，靠 PRE-10 人工检查 | (b) 先评估误报率 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R3 hold（§9-1）；R4/R6–R9 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；R3 hold（§9-1）；R4/R7–R10 待做。
 
 ### 9. 待确认（人）
 
@@ -188,6 +189,25 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 反证：临时在 ISR 首行插入 `defmt::info!("falsify")` → I4 FAIL 并定位 `main.rs:293`；还原后 `git diff` 为空。
 - 验证：`arch`/`fmt-check`/`clippy`/`test`/`hygiene`/`doc` 全 PASS（命令原文见提交回执）。
 - 未决项：I5/I6 仍未落地；HR §3（V2 历史表）与 §3.1（最新网表）两套引脚表并存；`Board::init`；`deadtime_dtg` 运行期 assert。
+
+---
+
+## 轮次 3：引脚真源收敛为一张表（HR §3.1）
+
+- 熵源：§6「PRE-10 数值/契约唯一真源」行；§8 R6
+- 调用方核实：
+  - `docs/hardware-requirements.md` §3（V2 表 24 行）+ §3.1（覆盖表 13 行）对同一功能给出不同答案：nSLEEP（PC5 vs PC7）、nFAULT（PB10+PC9 vs PC8）、相电流（PA1/PA7/PB0 vs PB0/PA7/PA3）、编码器片选（PB7/PB9 vs PC12/PC10）。
+  - INDEX §4 与 `.scratch/handoff.md` §4 各有一份 `SOA→PB0` 副本（PRE-10 违反）。
+- 一手材料：`hardware/pcb/Netlist_Schematic14_1_2026-11-27.tel` 的 `$NETS` 段（U1 脚 ↔ 网络）+ `docs/DS_stm32g474rb/Pinouts_and_pin_description.md` Table 12 的 LQFP64 列（脚号 → PXn / 复用 / 附加功能）。
+- 选定方案：§3 = 出处与指针；§3.1 = 唯一完整表（17 行，含"未连接"与"待确认"）；V2 表逐字移入 `docs/archive/pin-map-v2.md`，与 §3.1 冲突的行作废。
+- 放弃方案：(a) 保留双表 + 冲突标注 —— 读者仍要逐行判断哪条有效；(b) 只写脚本从网表生成表 —— 脚号→PXn 仍需 DS 解析器，本轮人工逐行复核成本更低（脚本化记为 R10 的延伸）。
+- 新发现（一手，未改代码）：`ADC12_IN6` 网络只有 U1.11 一个节点，无分压/热敏；LQFP64 脚 11 = PC3，附加功能 `ADC12_IN9`/`OPAMP5_VINP`。NTC 既未接、通道名也不存在 → 写进 HR §8-9 与 INDEX §4，标待确认。
+- 行为基线：纯文档；门禁输出不变。
+- 迁移完成：HR §3 双表合并；INDEX §4 引脚副本改指针；handoff §4 引脚副本改指针。
+- 删除的旧实现：HR §3 的 V2 表；§3.1 的"覆盖上表"语义（已无被覆盖对象）。
+- 防回归约束：未加机器检查（`P[A-D]\d+` 在代码注释里大量出现，误报高，见 R10）。
+- 验证：`test`/`check`/`hygiene`/`doc` 全 PASS（提交回执）。
+- 未决项：NTC 通道（HR §8-9）；R10 引脚 lint 误报率；`Board::init`。
 
 ---
 
