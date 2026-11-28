@@ -20,6 +20,9 @@ pub(crate) const FW: &str = "software/firmware";
 /// 门禁工具自己的 workspace 根；`fmt-check`/`clippy` 也必须覆盖它。
 pub(crate) const XTASK: &str = "software/xtask";
 
+/// `bsp` 是独立 thumb crate，自带 `.cargo/config.toml`；`fmt`/`clippy` 也要覆盖它。
+pub(crate) const BSP: &str = "software/bsp";
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_else(|| "help".to_string());
@@ -31,10 +34,12 @@ fn main() -> ExitCode {
         "rel" | "release" => cargo(&["build", "--release"]),
         "fmt" => cargo(&["fmt", "--all"])
             .and_then(|()| root_cargo(&["fmt", "--all"]))
-            .and_then(|()| xtask_cargo(&["fmt", "--all"])),
+            .and_then(|()| xtask_cargo(&["fmt", "--all"]))
+            .and_then(|()| bsp_cargo(&["fmt", "--all"])),
         "fmt-check" => cargo(&["fmt", "--all", "--", "--check"])
             .and_then(|()| root_cargo(&["fmt", "--all", "--", "--check"]))
-            .and_then(|()| xtask_cargo(&["fmt", "--all", "--", "--check"])),
+            .and_then(|()| xtask_cargo(&["fmt", "--all", "--", "--check"]))
+            .and_then(|()| bsp_cargo(&["fmt", "--all", "--", "--check"])),
         // `--all-targets` pulls in the test harness, which needs std on a
         // no_std thumb target; the firmware has one bin and no lib.
         // 根 workspace（算法层）与 xtask 也要过：`-D warnings` 把文档与 clippy
@@ -50,7 +55,9 @@ fn main() -> ExitCode {
                     "warnings",
                 ])
             })
-            .and_then(|()| xtask_cargo(&["clippy", "--all-targets", "--", "-D", "warnings"])),
+            .and_then(|()| xtask_cargo(&["clippy", "--all-targets", "--", "-D", "warnings"]))
+            // bsp 是 no_std lib：`--all-targets` 会拉 host 测试装置而链接失败，只查 lib。
+            .and_then(|()| bsp_cargo(&["clippy", "--", "-D", "warnings"])),
         // 根 workspace（host crate）的回归测试，不是 firmware。
         "test" => root_cargo(&["test", "--workspace"]),
         // 文档门禁：根 workspace 全量 rustdoc，任何警告即失败。
@@ -106,11 +113,12 @@ usage: cargo xtask <command> [args]
   check       cargo check (dev profile)
   build       cargo build (dev profile)
   rel         cargo build --release           (the acceptance profile)
-  fmt         cargo fmt --all                (firmware + root + xtask)
-  fmt-check   cargo fmt --all -- --check      (CI; same three workspaces)
+  fmt         cargo fmt --all                (firmware + root + xtask + bsp)
+  fmt-check   cargo fmt --all -- --check      (CI; same four workspaces)
   clippy      cargo clippy --bins -- -D warnings   (firmware)
               then cargo clippy --workspace --all-targets -- -D warnings (root)
               then cargo clippy --all-targets -- -D warnings (xtask)
+              then cargo clippy -- -D warnings (bsp; no_std lib has no host tests)
   test        cargo test --workspace         (root workspace, host)
   doc         cargo doc --no-deps --workspace (RUSTDOCFLAGS=-D warnings)
   size        build --release, then print ELF sections and flash image
@@ -152,6 +160,13 @@ fn root_cargo(args: &[&str]) -> Result<(), String> {
 fn xtask_cargo(args: &[&str]) -> Result<(), String> {
     let mut cmd = Command::new("cargo");
     cmd.current_dir(XTASK).args(args);
+    run(&mut cmd)
+}
+
+/// Runs cargo in `software/bsp`（独立 thumb workspace，目标由它自己的 `.cargo/config.toml` 决定）。
+fn bsp_cargo(args: &[&str]) -> Result<(), String> {
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(BSP).args(args);
     run(&mut cmd)
 }
 

@@ -136,7 +136,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R11 | firmware/bsp 注释级纠偏（`TRACE_FLAG_SELFTEST` 悬空 link、`bus_pwm.rs:101` 的 PB10 措辞） | B（Tier B，注释级） | (a) 与 R8/R9 同批做，一次 HIL 签收；(b) 单独做并标 `PENDING_HIL` | (a) |
 | R12 | `bsp` 的 fmt/clippy 覆盖（thumb crate，当前无人检查） | A | (a) 以 `CARGO_BUILD_TARGET=thumbv7em-none-eabihf --manifest-path software/bsp/Cargo.toml` 跑；(b) 让 firmware 的 `-p bsp` 生效需先并入同一 workspace（会破坏独立 workspace 约定） | (a) 评估构建副作用 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R3 hold（§9-1）；R7/R9–R12 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；R3 hold（§9-1）；R7/R9–R11 待做。
 
 ### 9. 待确认（人）
 
@@ -306,6 +306,22 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 反证：把 `bsp.motor.bus_encoder` 临时改成 `impl` → H6 FAIL 并点名该文件；还原后 PASS。
 - 验证：`fmt-check`/`clippy`/`test`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
 - 未决项：owner 是否等于"唯一实际写者"仍无静态检查；`ISR_*` 计数器与 TRACE 的 state 由其宿主模块代表。
+
+---
+
+## 轮次 9：`bsp` 也进 fmt/clippy（四个 workspace 全过门禁）
+
+- 熵源：§7「测试与工具链」行；R12
+- 调用方核实：`software/bsp` 是独立 thumb workspace，自带 `.cargo/config.toml`（target=thumbv7em-none-eabihf）与 `.gitignore`（忽略 `target/`、`Cargo.lock`）；`cargo xtask clippy` 此前只跑 firmware / 根 / xtask，bsp 的 8 个源文件无人检查。
+- 可行性实测：`cd software/bsp && cargo clippy -- -D warnings` PASS（不另生锁文件，`.gitignore` 已覆盖）；`cargo fmt --manifest-path software/bsp/Cargo.toml --all -- --check` 也 PASS。`--all-targets` 会拉 host 测试装置并 `can't find crate for test`，故 bsp 只查 lib。
+- 选定方案：`bsp_cargo` 一跳，接在 `fmt`/`fmt-check`/`clippy` 末尾。
+- 放弃方案：把 bsp 并入 firmware workspace —— 会破坏"独立 workspace 才能保证 `cargo build` 用 thumb 目标"的既有约定（`Cargo.toml` 顶部注释）。
+- 行为基线：改前 `fmt-check`/`clippy` PASS（三个 workspace）；改后仍 PASS（四个）。
+- 迁移完成：`main.rs` 命令分发、help、`BSP` 常量。
+- 删除的旧实现：无（补覆盖）。
+- 防回归约束：bsp 的格式与 lint 退化现在会让 `cargo xtask fmt-check` / `clippy` 直接失败。
+- 验证：`fmt-check`/`clippy`/`test`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
+- 未决项：`bsp` 仍无 host 测试（no_std + 寄存器，属 HIL 域）；`cargo xtask check`/`build` 仍只覆盖 firmware。
 
 ---
 
