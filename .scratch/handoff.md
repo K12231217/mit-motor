@@ -124,9 +124,11 @@ HIL: PASS 2026-11-28 标定档案读取与 A/B 选择（`--calib-test`）
 
 - 首次：两槽空（`a=false b=false`）；写入后 `a=true seq=1`；再复位 `b=true seq=2`；再复位读出 `seq=2`。
 - 记录字段：`uid=400017-42535015`、`ovp_mv=27000`；48 B + CRC-32，`CalibRecord::decode` 拒绝错魔数/版本/CRC（host 测试）。
-- **写路径 BLOCKED**：`PNB=32` 与 `PNB=64` 置 `STRT` 后 `CR=0x4001_0102/0x4001_0202`、`SR=0x10000(BSY)`，完成后无错误标志（`SR=0`），但 `0x0804_0000` 不变（空白检查失败）。
-  `CALIB_WRITE_ENABLED=false`，`write()` 返回 `Disabled`（HIL 日志 `code=6`）；未确认 bank 2 页号前不再擦写。
-- 待确认：RM0440 的 PNB 与 bank 2 页号映射（2 KB 页、双 bank、128 KB）。
+- 写路径已通：根因是**页擦除必须置 `FLASH_CR.BKER=1`（bit11）选 bank 2，PNB 是 bank 内页号（0…31）**；
+  RM0440 Rev 9 p.135。另：擦除后立即回读会拿到旧数据，不能拿"立即回读"当擦除判据——已删掉该检查，
+  改为写后回读校验（`write()` 的 Verify）。
+- 连续 4 次复位：seq 4→5→6 递增，每次写另一槽并回读通过；两槽都有效时按 seq 选新。
+- `cargo xtask hil`（不带 `--calib-test`）只读不写。
 
 ## 4. 待裁决（人）
 

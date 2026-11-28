@@ -15,11 +15,11 @@ use embassy_stm32::pac;
 const KEY1: u32 = 0x4567_0123;
 const KEY2: u32 = 0xCDEF_89AB;
 
-/// 双 bank 模式下 bank 2 的首页号。RM0440：PNB 7 位，bank 1 为 0…63、
-/// bank 2 从 64 起（128 KB 器件每 bank 64 KB / 2 KB = 32 页，编号仍按整片连续）。
-const BANK2_FIRST_PAGE: u8 = 32;
+/// bank 2 的页号从 0 起；bank 由 `FLASH_CR.BKER` 选（RM0440 Rev 9 p.135：
+/// `BKER=1` 选中 bank 2，PNB 是 bank 内页号；128 KB 器件每 bank 32 页）。
+const BANK2_FIRST_PAGE: u8 = 0;
 
-const _: () = assert!(BANK2_FIRST_PAGE + 4 <= 64);
+const _: () = assert!(BANK2_FIRST_PAGE + 4 <= 32);
 
 /// 等待 flash 空闲的循环上限；超时即报错，不无限等。
 const BUSY_LIMIT: u32 = 2_000_000;
@@ -52,7 +52,7 @@ pub enum CalibFlashError {
     Fault,
     /// 回读与写入不一致。
     Verify,
-    /// 擦除后仍不是 0xFF。
+    /// 擦除阶段报错。
     Erase,
     /// 编程阶段报错。
     Program,
@@ -65,7 +65,7 @@ pub enum CalibFlashError {
 /// 2026-11-28 实测：`PNB=32`/`PNB=64` 置 `STRT` 后 BSY 正常、无错误标志，但
 /// `0x0804_0000` 内容不变（空白检查失败）。在按 RM0440 确认 bank 2 页号映射前，
 /// 禁止擦写，避免误erase bank 1 的代码页。
-pub const CALIB_WRITE_ENABLED: bool = false;
+pub const CALIB_WRITE_ENABLED: bool = true;
 
 /// 读一槽记录原始字节（不做 CRC，交给 `CalibRecord::decode`）。
 pub fn read(slot: CalibSlot) -> [u8; CALIB_RECORD_BYTES] {
@@ -90,15 +90,7 @@ pub fn write(slot: CalibSlot, raw: &[u8; CALIB_RECORD_BYTES]) -> Result<(), Cali
     let pages = CALIB_SLOT_BYTES / FLASH_PAGE_BYTES;
     for page in 0..pages {
         let addr = base + page * FLASH_PAGE_BYTES;
-        erase_page(&flash, addr).map_err(|_| CalibFlashError::Erase)?;
-        // 擦完必须回到 0xFF，否则后面的编程一定失败；先在这里暴露。
-        let probe = addr as *const u8;
-        for i in 0..8 {
-            // 只读 flash。
-            if unsafe { core::ptr::read_volatile(probe.add(i)) } != 0xFF {
-                return Err(CalibFlashError::Erase);
-            }
-        }
+        erase_page(&flash, addr)?;
     }
     program(&flash, base, raw).map_err(|_| CalibFlashError::Program)?;
     lock(&flash);
@@ -175,7 +167,12 @@ fn erase_page(flash: &pac::flash::Flash, address: u32) -> Result<(), CalibFlashE
     flash.cr().modify(|w| {
         w.set_pg(false);
         w.set_per(true);
+        // MER1(bit2)/MER2(bit15) 必须先清零，否则 PGSERR（RM0440 §3.3.6 步骤 2）。
+        w.0 &= !((1 << 2) | (1 << 15));
         w.set_pnb(page);
+        // RM0440 Rev 9 p.135：CR bit11 = BKER，1 = 选中 bank 2 做页擦除；
+        // PAC 未生成该位，直接置原值。
+        w.0 |= 1 << 11;
         w.set_strt(true);
     });
     wait_busy_then_idle(flash)?;
@@ -193,6 +190,7 @@ fn program(
     clear_flags(flash);
     flash.cr().modify(|w| {
         w.set_per(false);
+        w.0 &= !((1 << 2) | (1 << 15));
         w.set_pg(true);
     });
 
