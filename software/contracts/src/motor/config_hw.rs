@@ -106,6 +106,22 @@ pub const ENC_COUNTS_PER_REV: u16 = 1 << ENC_ANGLE_BITS;
 /// `algorithms::motor::config_policy::ENC_SPI_HZ`。
 pub const ENC_SPI_MAX_HZ: u32 = 1_000_000_000 / 64;
 
+/// 母线分压上臂，单位 欧姆（网表 R15 = 100 kΩ，`Schematic14_1`）。
+pub const VBUS_DIV_HIGH_OHM: u32 = 100_000;
+/// 母线分压下臂，单位 欧姆（网表 R23 = 8.06 kΩ）。
+pub const VBUS_DIV_LOW_OHM: u32 = 8_060;
+
+/// 母线电压每 LSB，单位 mV：
+/// `VREF / 4096 × (R_high + R_low) / R_low`。
+///
+/// 由网表阻值与 2.5 V 参考推出，不依赖标定；单点实测用来验证它
+/// （`cargo xtask hil` 的 `vbus` 行 vs 电源设定值）。
+pub const VBUS_MV_PER_LSB: f32 = VREF_V * 1_000.0 / ADC_FULL_SCALE_CODE
+    * (VBUS_DIV_HIGH_OHM + VBUS_DIV_LOW_OHM) as f32
+    / VBUS_DIV_LOW_OHM as f32;
+
+const _: () = assert!(VBUS_MV_PER_LSB > 7.0 && VBUS_MV_PER_LSB < 9.0);
+
 /// Flash bank 2 起始地址，单位 字节。
 ///
 /// 双 bank 模式下两个 bank **不连续**：bank 1 是 `0x0800_0000…0x0800_FFFF`，bank 2 起于

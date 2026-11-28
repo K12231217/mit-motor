@@ -484,6 +484,21 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 
 ---
 
+## 轮次 18：VBUS 采样接入，OVP 因标度不符默认关闭
+
+- 新增：`bus_adc` 在 ADC2 注入组加第 2 个 rank（PB11/IN14）；`Sample.vbus_raw`；启动日志 `vbus=/mv=/ovp_raw=`。
+- 数值：`VBUS_MV_PER_LSB` 由网表阻值推出（8.186 mV/LSB，OVP 27.0 V ⇒ 3300 码）。
+- 实测（`tools/ovp_check.py`，Korad COM13）：母线 0 V → `vbus=3918`（≈2.39 V）；12 V → `4095` 饱和；
+  按分压应 ~1466。结论：**PB11 的读数与网表分压不符**，可能不是该网络或该板不是该版网表。
+- 决定：`VBUS_OVP_ENABLED=false` 先关掉（否则 24 V 正常运行会被误判过压并关 MOE）；
+  脚本默认只校验读数，`--expect-trip` 仅在阈值确认后使用。
+- 证据保留：`vbus` 码与 mV 每轮启动都打印，方便装好分压/确认引脚后一次对照。
+- 删除：无。防误动作：OVP 关闭是编译期常量，默认构建不含任何自动关断。
+- 验证：默认构建 `ovp=0`；`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene`/`tier` PASS。
+- 未决项：确认 PB11 实际电压与 R15/R23 装配；确认后改 `VBUS_MV_PER_LSB` 或改采样引脚，再开 OVP。
+
+---
+
 ## 轮次记录模板（下一轮起复制）
 
 ```md

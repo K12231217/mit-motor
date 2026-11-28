@@ -101,6 +101,16 @@ HIL: BLOCKED 2026-11-28 DAC→三路 ADC 斜坡（HR-804，`--dac-ramp`）
 - `dac-ramp code=512 … spread=7 follow=false`；`code=3584 … follow=false`；三路始终 ≈2039。
 - 判定：**J_SYNC 跳线未装**（PA4 未进电流采样输入），不是固件缺陷；装好后重跑 `cargo xtask hil --dac-ramp`。
 
+HIL: BLOCKED 2026-11-28 软件 OVP（VBUS 标度与网表不符）
+
+- 新增：ADC2 注入 rank2 采 PB11/`ADC2_IN14`，`adc0 ... vbus=… mv=…` 每轮启动打印。
+- 实测矛盾：母线 0 V（电源 OUT0）→ `vbus=3918~3920`（≈2.39 V）；12 V → `4095` 饱和。
+  按网表 100 kΩ/8.06 kΩ 分压，12 V 应约 `1466` 码。两者不符。
+- 处理：`config_policy::VBUS_OVP_ENABLED = false`，OVP 默认关闭，避免 24 V 正常母线被误切；
+  `ovp=0` 已复测。台架脚本 `tools/ovp_check.py` 默认只校验电压读数，不升到 27.5 V。
+- 待确认（人 + 万用表）：PB11 对地电压在 0/12 V 时各是多少；R15（应为 100 kΩ）与
+  R23（应为 8.06 kΩ）是否按 Schematic14_1 装配；板上实际是否为该版网表。
+
 ## 4. 待裁决（人）
 
 - nSLEEP 唤醒时间缺 MP6540HA 手册确认（现实现：`wake` ≤100 ms 轮询 nFAULT，`enable` 另等 1 ms；多次 HIL 未见抖动）。

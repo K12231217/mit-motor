@@ -48,6 +48,7 @@ const TRACE_R_FULL_SCALE_AMPS: f32 = 0.5;
 const AUTO_TRIGGER_SAMPLES: u32 = 2_000;
 
 static ADC_ERRORS: AtomicU32 = AtomicU32::new(0);
+static OVP_TRIPPED: AtomicU32 = AtomicU32::new(0);
 static ISR_CYCLES: AtomicU32 = AtomicU32::new(0);
 static ISR_COUNT: AtomicU32 = AtomicU32::new(0);
 
@@ -59,6 +60,7 @@ pub mod pac {
 }
 
 struct Current {
+    pwm: Pwm,
     adc: Adc,
     gate: GainGate,
     trace: Trace,
@@ -276,7 +278,6 @@ mod app {
 
     #[local]
     struct Local {
-        pwm: Pwm,
         current: Current,
     }
 
@@ -496,6 +497,7 @@ mod app {
             pa3: p.PA3,
             pa7: p.PA7,
             pb0: p.PB0,
+            pb11: p.PB11,
         }) else {
             trace.freeze();
             defmt::error!("adc=bad: OPAMP/ADC calibrate or ready timeout; TP2/PB7 fault");
@@ -562,12 +564,14 @@ mod app {
         // Bench zero snapshot: no PWM output, driver awake. This is diagnostic only;
         // the gate still requires a zero inside its plausibility window.
         let mut sum = [0u32; 3];
+        let mut vbus_sum = 0u32;
         let mut n = 0u32;
         for _ in 0..32 {
             if let Some(sample) = adc.take_sample() {
                 sum[0] += u32::from(sample.raw.code[0]);
                 sum[1] += u32::from(sample.raw.code[1]);
                 sum[2] += u32::from(sample.raw.code[2]);
+                vbus_sum += u32::from(sample.vbus_raw);
                 n += 1;
             }
         }
@@ -583,12 +587,16 @@ mod app {
             sum[1] as f32 / n as f32,
             sum[2] as f32 / n as f32,
         ];
+        let vbus_raw = vbus_sum / n;
         defmt::info!(
-            "adc0 n={=u32} a={=f32} b={=f32} c={=f32}",
+            "adc0 n={=u32} a={=f32} b={=f32} c={=f32} vbus={=u32} mv={=i32} ovp_raw={=u16}",
             n,
             zero[0],
             zero[1],
-            zero[2]
+            zero[2],
+            vbus_raw,
+            (vbus_raw as f32 * contracts::motor::config_hw::VBUS_MV_PER_LSB) as i32,
+            algorithms::motor::config_policy::VBUS_OVP_RAW
         );
 
         let op1 = embassy_stm32::pac::OPAMP1.csr().read();
@@ -616,7 +624,23 @@ mod app {
             }
         }
 
+        let st = pwm.state();
+        defmt::info!(
+            "pwm=ok arr={} dtg={} moe={} aoe={} bke={} ccer=0x{:x} off={} nfault={} n_sleep={}",
+            st.arr,
+            st.dtg,
+            st.moe,
+            st.aoe,
+            st.bke,
+            st.ccer,
+            st.outputs_off,
+            st.nfault,
+            st.n_sleep
+        );
+        defmt::info!("current=go (20 kHz TIM1_UP)");
+
         let current = Current {
+            pwm,
             adc,
             gate,
             trace,
@@ -627,26 +651,8 @@ mod app {
             released: false,
         };
 
-        bringup::spawn().ok();
         monitor::spawn().ok();
-        (Shared {}, Local { pwm, current })
-    }
-
-    /// Logs the static safe-off state; owns TIM1 for the program lifetime.
-    #[task(priority = 1, local = [pwm])]
-    async fn bringup(cx: bringup::Context) {
-        let pwm = cx.local.pwm.state();
-        defmt::info!(
-            "pwm=ok arr={} dtg={} moe={} aoe={} bke={} nfault={} n_sleep={}",
-            pwm.arr,
-            pwm.dtg,
-            pwm.moe,
-            pwm.aoe,
-            pwm.bke,
-            pwm.nfault,
-            pwm.n_sleep
-        );
-        defmt::info!("current=go (20 kHz TIM1_UP)");
+        (Shared {}, Local { current })
     }
 
     /// 20 kHz hardware task. No defmt, no await, no lock.
@@ -660,6 +666,15 @@ mod app {
         current.trace.sync_loop_high();
 
         if let Some(sample) = current.adc.take_sample() {
+            // 母线过压：锁存 + 立即关 MOE/六路 + 拉低 nSLEEP；只做一次，避免反复写寄存器。
+            if algorithms::motor::config_policy::VBUS_OVP_ENABLED
+                && sample.vbus_raw >= algorithms::motor::config_policy::VBUS_OVP_RAW
+                && OVP_TRIPPED.swap(1, Ordering::Relaxed) == 0
+            {
+                current.pwm.disable();
+                current.trace.freeze();
+            }
+
             let _ = current.gate.step(sample.raw, sample.window_ok);
             if let Some(r_lsb) = current.gate.last_residual_lsb() {
                 let r_amps = r_lsb * AMPS_PER_LSB;
@@ -713,10 +728,11 @@ mod app {
 
         let s = trace::TRACE.summary();
         defmt::info!(
-            "current errors={=u32} isr_cycles={=u32} isr_count={=u32} recorder pre={=u32} post={=u32} len={=u32} total={=u32} trigger={} locked={} stride={=u32}",
+            "current errors={=u32} isr_cycles={=u32} isr_count={=u32} ovp={=u32} recorder pre={=u32} post={=u32} len={=u32} total={=u32} trigger={} locked={} stride={=u32}",
             ADC_ERRORS.load(Ordering::Relaxed),
             ISR_CYCLES.load(Ordering::Relaxed),
             ISR_COUNT.load(Ordering::Relaxed),
+            OVP_TRIPPED.load(Ordering::Relaxed),
             s.pre,
             s.post,
             s.len,

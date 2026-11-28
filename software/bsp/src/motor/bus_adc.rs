@@ -18,7 +18,7 @@ use embassy_stm32::pac;
 use embassy_stm32::pac::adc::vals::{Adcaldif, Difsel, Exten, Jexten, SampleTime};
 use embassy_stm32::pac::gpio::vals::Moder;
 use embassy_stm32::pac::opamp::vals::{Opahsm, Opaintoen, PgaGain, VmSel, VpSel};
-use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, OPAMP1, OPAMP2, OPAMP3, PA3, PA7, PB0};
+use embassy_stm32::peripherals::{ADC1, ADC2, ADC3, OPAMP1, OPAMP2, OPAMP3, PA3, PA7, PB0, PB11};
 
 use crate::motor::service_timebase::now_us;
 
@@ -36,6 +36,7 @@ pub struct Adc {
     _pa3: PA3,
     _pa7: PA7,
     _pb0: PB0,
+    _pb11: PB11,
     tick: u32,
 }
 
@@ -43,6 +44,8 @@ pub struct Adc {
 pub struct Sample {
     /// 三路原始码、拍号与采样时刻。
     pub raw: RawSample3,
+    /// 母线分压后的 12 bit 码（0…4095），标度见 `VBUS_MV_PER_LSB`。
+    pub vbus_raw: u16,
     /// 本拍是否落在低边共导窗口：MOE=1、AOE=0、三路 CCxNE=1。
     pub window_ok: bool,
 }
@@ -67,6 +70,8 @@ pub struct AdcPins {
     pub pa7: PA7,
     /// OPAMP3 输入。
     pub pb0: PB0,
+    /// 母线分压输入（`VBUS_ADC`，PB11/ADC12_IN14）。
+    pub pb11: PB11,
 }
 
 impl Adc {
@@ -83,6 +88,10 @@ impl Adc {
         pac::GPIOA.moder().modify(|w| w.set_moder(3, Moder::ANALOG));
         pac::GPIOA.moder().modify(|w| w.set_moder(7, Moder::ANALOG));
         pac::GPIOB.moder().modify(|w| w.set_moder(0, Moder::ANALOG));
+        // 母线分压：PB11 只作模拟输入。
+        pac::GPIOB
+            .moder()
+            .modify(|w| w.set_moder(11, Moder::ANALOG));
 
         // OPAMP1=SOC/PA3, OPAMP2=SOB/PA7, OPAMP3=SOA/PB0，全部 follower。
         configure_opamp(&pac::OPAMP1, VpSel::VINP1);
@@ -90,9 +99,10 @@ impl Adc {
         configure_opamp(&pac::OPAMP3, VpSel::VINP0);
 
         // 内部输出通道：OPAMP1→ADC1_IN13, OPAMP2→ADC2_IN16, OPAMP3→ADC3_IN13。
-        if !configure_adc(&pac::ADC1, 13)
-            || !configure_adc(&pac::ADC2, 16)
-            || !configure_adc(&pac::ADC3, 13)
+        // ADC2 的第 2 个注入 rank 兼采母线（IN14）；ADC1/3 保持单通道。
+        if !configure_adc(&pac::ADC1, 13, None)
+            || !configure_adc(&pac::ADC2, 16, Some(14))
+            || !configure_adc(&pac::ADC3, 13, None)
         {
             return None;
         }
@@ -107,6 +117,7 @@ impl Adc {
             _pa3: pins.pa3,
             _pa7: pins.pa7,
             _pb0: pins.pb0,
+            _pb11: pins.pb11,
             tick: 0,
         })
     }
@@ -119,9 +130,10 @@ impl Adc {
     /// 不软件启动转换。
     pub fn take_sample(&mut self) -> Option<Sample> {
         let window_ok = low_side_window();
-        let c = wait_result(&pac::ADC1)?;
-        let b = wait_result(&pac::ADC2)?;
-        let a = wait_result(&pac::ADC3)?;
+        let c = wait_result(&pac::ADC1, 0)?;
+        let b = wait_result(&pac::ADC2, 0)?;
+        let vbus = pac::ADC2.jdr(1).read().jdata() as u16;
+        let a = wait_result(&pac::ADC3, 0)?;
 
         self.tick = self.tick.wrapping_add(1);
         Some(Sample {
@@ -130,6 +142,7 @@ impl Adc {
                 t_us: now_us(),
                 code: [a, b, c],
             },
+            vbus_raw: vbus,
             window_ok,
         })
     }
@@ -146,7 +159,7 @@ fn configure_opamp(opamp: &pac::opamp::Opamp, vp: VpSel) {
     });
 }
 
-fn configure_adc(adc: &pac::adc::Adc, channel: u8) -> bool {
+fn configure_adc(adc: &pac::adc::Adc, channel: u8, aux: Option<u8>) -> bool {
     // 退出 deep power，开内部稳压器；10 µs 稳定时间。
     adc.cr().modify(|w| {
         w.set_deeppwd(false);
@@ -189,6 +202,11 @@ fn configure_adc(adc: &pac::adc::Adc, channel: u8) -> bool {
     let smp_index = if channel >= 10 { channel - 10 } else { channel };
     adc.smpr(smpr)
         .modify(|w| w.set_smp(smp_index as usize, SampleTime::CYCLES64_5));
+    if let Some(aux) = aux {
+        let (smpr, index) = if aux >= 10 { (1, aux - 10) } else { (0, aux) };
+        adc.smpr(smpr)
+            .modify(|w| w.set_smp(index as usize, SampleTime::CYCLES64_5));
+    }
 
     adc.isr().write(|w| w.set_adrdy(true));
     adc.cr().modify(|w| w.set_aden(true));
@@ -200,10 +218,13 @@ fn configure_adc(adc: &pac::adc::Adc, channel: u8) -> bool {
     // 注入组：JL=0（1 个转换），JEXTSEL=8（TIM1_TRGO2），JEXTEN=上升沿。
     // JRQ 只能在 JADSTART=0 时改；此时尚未启动。
     adc.jsqr().modify(|w| {
-        w.set_jl(0);
+        w.set_jl(if aux.is_some() { 1 } else { 0 });
         w.set_jextsel(8);
         w.set_jexten(Jexten::RISINGEDGE);
         w.set_jsq1(0, channel);
+        if let Some(aux) = aux {
+            w.set_jsq1(1, aux);
+        }
     });
     // RM0440 §21.4.15/§21.4.18：注入硬件触发必须置 JADSTART=1，否则
     // JEXTEN 的边沿被忽略。这里保持 JQDIS=1（队列关闭），JEXTEN=01
@@ -232,11 +253,11 @@ fn low_side_window() -> bool {
     bdtr.moe() && !bdtr.aoe() && ccer.ccne(0) && ccer.ccne(1) && ccer.ccne(2)
 }
 
-fn wait_result(adc: &pac::adc::Adc) -> Option<u16> {
+fn wait_result(adc: &pac::adc::Adc, rank: usize) -> Option<u16> {
     if !wait_until(|| adc.isr().read().jeos(), 4_000) {
         return None;
     }
-    let value = adc.jdr(0).read().jdata() as u16;
+    let value = adc.jdr(rank).read().jdata() as u16;
     adc.isr().write(|w| w.set_jeos(true));
     Some(value)
 }

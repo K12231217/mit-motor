@@ -222,6 +222,24 @@ pub const ENC_FAIL_LATCH_FRAMES: u8 = 2;
 /// 依据：覆盖量化与两帧之间的采样相位抖动；4 LSB ≈ 0.088° 机械角。
 pub const ENC_JUMP_MARGIN_LSB: u8 = 4;
 
+/// 母线过压阈值，单位 mV。
+///
+/// `HR-101`：母线 12–24 V，绝对上限 28 V；留 1 V 给分压/参考误差，取 27.0 V。
+/// 只做软件停机（`ADR-18`：本板无 `TIM1_BKIN`）。
+pub const VBUS_OVP_MV: u32 = 27_000;
+
+/// 过压阈值对应的 12 bit 码（四舍五入）；超过它即锁存并关 MOE。
+pub const VBUS_OVP_RAW: u16 = (VBUS_OVP_MV as f32 / hw::VBUS_MV_PER_LSB + 0.5) as u16;
+
+/// 软件 OVP 是否生效。
+///
+/// **2026-11-28 实测未通过**：本板 PB11/`VBUS_ADC` 在母线 0 V 时读数 3920、
+/// 12 V 时饱和 4095，与网表 100 kΩ/8.06 kΩ 分压（预期 ~1466 码 @12 V）不符。
+/// 在确认实际分压/引脚之前，OVP 保持关闭，避免正常 24 V 被误判为过压。
+pub const VBUS_OVP_ENABLED: bool = false;
+
+const _: () = assert!(VBUS_OVP_RAW > 0 && VBUS_OVP_RAW < 4095);
+
 /// 故障清除前要求的无故障持续时长，单位 `µs`。
 ///
 /// 依据：HR 的安全阶梯要求"故障锁存，清除需显式命令 + 无故障持续 T"，未给 T。取
