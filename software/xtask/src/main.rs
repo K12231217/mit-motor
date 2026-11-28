@@ -459,8 +459,8 @@ fn hil(args: &[String]) -> Result<(), String> {
         }
     }
     println!("HIL bench card (fixed test points, docs/instrumentation.md):");
-    println!("  CH1 PA4/TP1  DAC1_OUT1 residual     0 A = 1.65 V");
-    println!("  CH2 PA5/TP2  DAC1_OUT2 freeze       0 V normal / 3.3 V frozen");
+    println!("  CH1 PA4/TP1  DAC1_OUT1 residual     0 A = 1.25 V (VREF+ = 2.5 V)");
+    println!("  CH2 PA5/TP2  DAC1_OUT2 freeze       0 V normal / 2.49 V frozen");
     println!("  CH3 PB6      TP_SYNC_LOOP           20 kHz ISR envelope");
     println!("  CH4 PB7      TP_SYNC_FREEZE         frozen window");
     println!("  trigger: CH2 rising, single; start 10 ms/div, then 20 us/div for PWM");

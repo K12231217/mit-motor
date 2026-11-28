@@ -7,9 +7,9 @@
 
 | ID | 模式 | 目标 | 冻结/基线 | 状态 |
 |---|---|---|---|---|
-| T-015 | B | 20 kHz current task：TIM1_UP → OPAMP/ADC → GainGate 残差 → DAC/TP_SYNC/录波 | T-014 HIL 后 | **HIL PASS（ADC/rate/DAC/freeze）**：`adc0≈2038`、`r_lsb≈-1`、`isr_count=20013/s`；TP1=1.2623 V、TP2 静态=2.496 V；实测 boot-freeze 1 s，随后 100 ms 自动触发 76.8 ms；`enable` 波形未测 |
+| T-015 | B | 20 kHz current task：TIM1_UP → OPAMP/ADC → GainGate 残差 → DAC/TP_SYNC/录波 | T-014 HIL 后 | **HIL PASS（ADC/rate/DAC/freeze；2026-11-28 无电机复跑）**：`adc0≈2039`、`r_lsb∈{-1,0,1}`、`isr_count=20004/s`、`isr_cycles=692`（MOE=0）/1789（MOE=1）；`--enable-zero` 时 `trigger=true locked=true`；TP1=1.2623 V、TP2=2.496 V；六路门极/死区波形未测 |
 | T-014 | B | trace 基础设施：PB6/PB7 TP_SYNC、DAC1_OUT1 残差/OUT2 冻结、TIM5 1 MHz、DWT、512/1536 预/后触发环与 `stride` | T-012 HIL 后 | **HIL: PASS（RTT/寄存器）**：`recorder pre=512 post=1536 len=2048`；stride 1/10 均锁存；物理 DAC/TP_SYNC 未测 |
-| T-012 | B | `bsp` clock + pwm：HSE 16M/PLL 170M 读回；TIM1 20 kHz/500 ns；按 2026-11-27 网表 nSLEEP PC7、nFAULT PC8、无 BKIN | `4f67b32`（T-011 脚手架） | **HIL: PASS（safe-off）**：RTT `clock=ok`、`pwm=ok arr=4250 dtg=85 moe/aoe/bke=false`；定时器/死区已按 RM0440 对照（RCR=1、DTG=85→500 ns），`enable` 门极波形不测；低边窗口按互补 PWM 默认三相同时；仅使用 TP1/TP2/PB6/PB7；硬件过压 break 缺口待补 |
+| T-012 | B | `bsp` clock + pwm：HSE 16M/PLL 170M 读回；TIM1 20 kHz/500 ns；按 2026-11-27 网表 nSLEEP PC7、nFAULT PC8、无 BKIN | `4f67b32`（T-011 脚手架） | **HIL: PASS（safe-off）**：RTT `clock=ok`、`pwm=ok arr=4250 dtg=85 moe/aoe/bke=false`；定时器/死区已按 RM0440 对照（RCR=1、DTG=85→500 ns），`enable` 门极波形不测；低边窗口按互补 PWM 默认三相同时；仅使用 TP1/TP2/PB6/PB7；硬件过压 break 已裁决不补（ADR-18） |
 
 ## 2. 当前工作区
 
@@ -59,9 +59,23 @@ HIL: PASS 2026-11-27 T-015 20 kHz current task（ADC/rate）
 - 复位启动：最早期把 PB7 拉高作“已进 init”标记；`Trace` 提前初始化；`Pwm::wake` 的 nFAULT 等待从 10 ms 放宽到 100 ms；时钟校验重试 10×10 ms；wake/ADC/零位/门控失败时 TP2+PB7 常高作故障码。
 - 手动复位“全无输出”已定位：`probe-rs`/GDB 留下的 `DEMCR.VC_CORERESET=1` 把核停在 `Reset`（PC 0x080001d8，DHCSR C_HALT=1）；NRST 仍为 3.3 V，但固件没执行。清除 DEMCR bit0 或断电重上电后恢复；不是芯片卡死。
 
+HIL: PASS 2026-11-28 T-015 复跑（无电机，`cargo xtask hil`，J-Link `1366:0105:000602712682`）
+
+- `clock=ok (HSE 16M / PLL 170M)`；`adc=ok`；`opamp en/into/vm` 全 true。
+- `adc0 n=32 a=2038.9 b=2039.6 c=2039.1`；`pwm=ok arr=4250 dtg=85 moe=false aoe=false bke=false nfault=false n_sleep=true`。
+- 1 s 汇总：`current errors=0 isr_cycles=692 isr_count=20004 recorder … trigger=false locked=false`（MOE=0 不触发，符合窗口判据）。
+- 未测：PB6/PB7 边沿、DAC 实际电压（无示波器读数）。
+
+HIL: PASS 2026-11-28 T-015 零矢量使能复跑（无电机，`cargo xtask hil --enable-zero`）
+
+- `hil=enable-zero moe=1`；`pwm=ok arr=4250 dtg=85 moe=true aoe=false bke=false nfault=false`。
+- 1 s 汇总：`isr_cycles=1789 isr_count=20003`（< 25 µs 预算）；`recorder pre=512 post=1536 len=2048 total=3536 trigger=true locked=true stride=1`。
+- DATA 帧：`ia/ib/ic≈2039`（零位 2039），`r_lsb ∈ {-1,0,1}`，`flags=0`。
+- 未测：六路门极/死区物理波形、电机负载。
+
 ## 4. 待裁决（人）
 
-- 硬件过压 break 缺口：补 TIM1_BKIN 还是只做软件 OVP 停机。
-- 500 ns 死区 LA 实测；nSLEEP 1 ms 唤醒是否足够。
+- nSLEEP 唤醒时间缺 MP6540HA 手册确认（现实现：`wake` ≤100 ms 轮询 nFAULT，`enable` 另等 1 ms；多次 HIL 未见抖动）。
 - T-013 的 A/C 映射由 HR §3.1 固定（本文件不复写引脚），不作为 HIL 项。
 - `CalibRecord` 字段集与 A/B 新旧判定（决定 `bsp` flash 接口）。
+- 已裁决 2026-11-28：硬件过压 break（只做软件 OVP）、死区（暂不 LA 实测，保持 500 ns）、NTC（不装）→ INDEX §3 ADR-18/19/20。

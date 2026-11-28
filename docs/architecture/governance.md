@@ -140,10 +140,10 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R10 | 文档级引脚 lint（`P[A-D]\d+` 只许出现在 HR §3.1） | A | (a) 加 hygiene 规则 + 白名单；(b) 不加，靠 PRE-10 人工检查 | (b) 先评估误报率 |
 | R11 | firmware/bsp 注释级纠偏（`TRACE_FLAG_SELFTEST` 悬空 link、`bus_pwm.rs:101` 的 PB10 措辞） | B（Tier B，注释级） | (a) 与 R8/R9 同批做，一次 HIL 签收；(b) 单独做并标 `PENDING_HIL` | (a) |
 | R12 | `bsp` 的 fmt/clippy 覆盖 | A | (a) 以 `CARGO_BUILD_TARGET=thumbv7em-none-eabihf --manifest-path software/bsp/Cargo.toml` 跑；(b) 让 firmware 的 `-p bsp` 生效需先并入同一 workspace（会破坏独立 workspace 约定） | (a) 评估构建副作用 |
-| R13 | `tier` 对注释级 bsp/firmware 改动也要求 HIL（路径粒度） | A | (a) 行级判断"只改注释则跳过"；(b) 接受摩擦，人决定是否开 hil-pending 分支 | (b) 不用启发式 |
+| R13 | `tier` 对注释级 bsp/firmware 改动也要求 HIL（路径粒度） | A | (a) 行级判断"只改注释则跳过"；(b) 接受摩擦，人决定是否开 hil-pending 分支 | (b) 不用启发式；2026-11-28 HIL 已跑，R9/R11 可开新分支做 |
 | R14 | `LSB_*` 等线协议常量未被编码函数引用 | A | (a) 编码/解码引用 `1.0/LSB_*`；(b) 保持内联，在常量上注明"文档值" | (b) 不碰 wire 语义 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；架构文档 §4–§10 纠偏完成（轮次 10）；状态字表示归一完成（轮次 11）；检查器自测完成（轮次 12）；内存事实分层完成（轮次 13）；独立复审修复完成（轮次 14）；R3 hold（§9-1）；R7/R9–R11、R13/R14 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；架构文档 §4–§10 纠偏完成（轮次 10）；状态字表示归一完成（轮次 11）；检查器自测完成（轮次 12）；内存事实分层完成（轮次 13）；独立复审修复完成（轮次 14）；三项裁决落档 + HIL 复跑完成（轮次 15）；R3 hold（§9-1）；R7/R9–R11、R13/R14 待做。
 
 ### 9. 待确认（人）
 
@@ -426,6 +426,28 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：新增 4 组用例——注释里的 `}` 不得截断、行尾 `todo!()` 不算桩、`code_only` 的字面量/注释/除法三例。
 - 验证：`test`（142）/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
 - 未决项：块注释与字符字面量里的花括号仍不覆盖（H5 禁止块注释；如需覆盖再引入解析器）。
+
+---
+
+## 轮次 15：三项产品裁决落地 + 无电机 HIL 复跑
+
+- 决策（用户，2026-11-28）：
+  - 不加 NTC 通道（网表 `ADC12_IN6` 悬空、脚 11 为 PC3 无匹配通道）→ ADR-19；
+  - 不补硬件过压 break（本板无 TIM1_BKIN），只做软件 OVP 停机 → ADR-18；
+  - 死区暂不做 LA 实测，DTG 保持 500 ns（HR-302 上限）→ ADR-20。
+- 写入位置：INDEX §3 ADR 表 + §4（只剩 nSLEEP、CalibRecord 两项）；HR-302/401/405/§8-7/§8-9；handoff §1/§4。
+- HIL（板子无电机，J-Link `1366:0105:000602712682`，`cargo xtask hil` 默认构建）：
+  - `clock=ok`、`adc=ok`、`opamp` 三路 true；`adc0 a/b/c=2038.9/2039.6/2039.1`；
+  - `pwm=ok arr=4250 dtg=85 moe=false aoe=false bke=false nfault=false n_sleep=true`；
+  - 1 s：`errors=0 isr_cycles=692 isr_count=20004 trigger=false locked=false`（MOE=0 不触发，窗口判据未误报）。
+- HIL（同板，`cargo xtask hil --enable-zero`）：
+  - `moe=true`；`isr_cycles=1789 isr_count=20003`（预算 25 µs=4250 cycles）；
+  - `recorder pre=512 post=1536 len=2048 total=3536 trigger=true locked=true`；DATA `raw≈2039`、`r_lsb∈{-1,0,1}`、`flags=0`。
+- 顺带修正：`cargo xtask hil` 的台架提示卡把 0 A 写成 1.65 V、冻结写成 3.3 V；实际 VREF+=2.5 V（TP1≈1.25 V、TP2≈2.49 V），已改。
+- 行为基线：HIL 前的软件门禁不变；证据只取自 RTT 日志（`.scratch/hil/run.log`，不入库）。
+- 未做：示波器/LA 物理波形（死区、TP_SYNC 边沿、DAC 电压）、电机负载；`CalibRecord` 仍待定。
+- 验证：`test`（142）/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene`/`tier` 全 PASS（提交回执）。
+- 未决项：nSLEEP 唤醒需 MP6540HA 手册确认；`CalibRecord` 字段集。
 
 ---
 
