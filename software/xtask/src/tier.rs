@@ -89,9 +89,7 @@ pub fn run(rest: &[String]) -> Result<(), String> {
     let mut details: Vec<String> = tier_b.iter().map(|path| (*path).clone()).collect();
     details.push(String::new());
     details.push("Tier B 改动需要台架证据才能进 main。二选一：".to_string());
-    details.push(format!(
-        "  1) 把改动留在 hil-pending 分支 / Draft PR，先不合 main；"
-    ));
+    details.push("  1) 把改动留在 hil-pending 分支 / Draft PR，先不合 main；".to_string());
     details.push(format!(
         "  2) 跑实测（RTT、示波器、电流采样），在 {HANDOFF} §3 写一行以 `{HIL_MARKER}` 开头的记录。"
     ));

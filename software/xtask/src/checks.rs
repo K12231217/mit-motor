@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::fs::{collect_rs, rel};
 use crate::{elf_path, host_triple, rustc_output, tool};
 
 const BANNED: [&str; 4] = ["bsp", "embassy-stm32", "embassy-executor", "rtic"];
@@ -152,12 +153,12 @@ fn check_unsafe() -> Outcome {
             Ok(bytes) => bytes,
             Err(e) => {
                 return Outcome::Fail {
-                    summary: format!("无法读取 {}", file.display()),
+                    summary: format!("无法读取 {}", rel(file)),
                     details: vec![e.to_string()],
                 }
             }
         };
-        let path = file.to_string_lossy().replace('\\', "/");
+        let path = rel(file);
         for (idx, raw) in bytes.split(|b| *b == b'\n').enumerate() {
             let line = String::from_utf8_lossy(raw);
             let line = line.trim_end_matches('\r');
@@ -178,18 +179,6 @@ fn check_unsafe() -> Outcome {
             details: hits,
         }
     }
-}
-
-fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            collect_rs(&path, out)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            out.push(path);
-        }
-    }
-    Ok(())
 }
 
 /// I3 —— 无堆：链接产物里没有分配器符号。
@@ -319,7 +308,10 @@ fn isr_body(lines: &[&str]) -> Option<(usize, usize)> {
     let anchor = lines
         .iter()
         .position(|line| line.contains("#[task(binds = TIM1_UP"))?;
-    let start = anchor + lines[anchor..].iter().position(|l| l.contains("fn current("))?;
+    let start = anchor
+        + lines[anchor..]
+            .iter()
+            .position(|l| l.contains("fn current("))?;
 
     let mut depth = 0i32;
     let mut opened = false;
@@ -392,7 +384,7 @@ fn check_fsm_single_owner() -> Outcome {
     let mut hits = Vec::new();
     let mut scanned = 0usize;
     for file in &files {
-        let path = file.to_string_lossy().replace('\\', "/");
+        let path = rel(file);
         if ALLOWED.contains(&path.as_str()) {
             continue;
         }
@@ -401,7 +393,7 @@ fn check_fsm_single_owner() -> Outcome {
             Ok(bytes) => bytes,
             Err(e) => {
                 return Outcome::Fail {
-                    summary: format!("无法读取 {}", file.display()),
+                    summary: format!("无法读取 {}", rel(file)),
                     details: vec![e.to_string()],
                 }
             }

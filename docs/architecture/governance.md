@@ -132,8 +132,9 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R9 | `main.rs` 5 处 `trace.freeze(); defmt::error!; loop spin` 故障停机副本 | B（Tier B） | (a) 提取 `halt_with_fault(code)` 单点；(b) 留在 `init` 内联 | (a) |
 | R10 | 文档级引脚 lint（`P[A-D]\d+` 只许出现在 HR §3.1） | A | (a) 加 hygiene 规则 + 白名单；(b) 不加，靠 PRE-10 人工检查 | (b) 先评估误报率 |
 | R11 | firmware/bsp 注释级纠偏（`TRACE_FLAG_SELFTEST` 悬空 link、`bus_pwm.rs:101` 的 PB10 措辞） | B（Tier B，注释级） | (a) 与 R8/R9 同批做，一次 HIL 签收；(b) 单独做并标 `PENDING_HIL` | (a) |
+| R12 | `bsp` 的 fmt/clippy 覆盖（thumb crate，当前无人检查） | A | (a) 以 `CARGO_BUILD_TARGET=thumbv7em-none-eabihf --manifest-path software/bsp/Cargo.toml` 跑；(b) 让 firmware 的 `-p bsp` 生效需先并入同一 workspace（会破坏独立 workspace 约定） | (a) 评估构建副作用 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4，见 R10 的机器化缺口）；R3 hold（§9-1）；R4/R7–R11 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5）；R3 hold（§9-1）；R4/R7–R12 待做。
 
 ### 9. 待确认（人）
 
@@ -230,6 +231,24 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：无（自然语言里的状态/引脚无法低成本机器校验；PRE-10 仍是人工 grep，见 R10）。
 - 验证：`test`/`check`/`hygiene`/`doc` PASS（提交回执）。
 - 未决项：`trace/mod.rs:50` 悬空 link（R11）；`bus_pwm.rs:101` 的 PB10 措辞（R11）。
+
+---
+
+## 轮次 5：门禁工具自己也过门禁
+
+- 熵源：§4「重复实现清单」新增项；§7「测试与工具链」行
+- 调用方核实：
+  - `collect_rs` 在 `checks.rs:183` 与 `hygiene.rs:501` 函数体逐字相同；路径显示 `.replace('\\\\', "/")` 在 checks 出现 2 次、hygiene 封装 1 次。
+  - 在 `software/xtask` 直接跑 `cargo fmt --all -- --check` 有 1 处 diff（`checks.rs` 的 `isr_body`），`cargo clippy --all-targets -- -D warnings` 有 2 个错误（`question_mark`、`useless_format`）。
+  - 根因：`cargo xtask fmt-check` / `clippy` 只跑 firmware 与根 workspace，`software/xtask` 是独立 workspace，无人检查。
+- 选定方案：新建 `software/xtask/src/fs.rs`（`collect_rs` + `rel`），删掉两份副本；`fmt`/`fmt-check` 增加根 workspace 与 xtask 两跳；`clippy` 增加 xtask 一跳；修掉既有 2 个 lint 与格式偏差。
+- 放弃方案：把 `bsp` 一起纳入 clippy —— thumb crate 需要目标配置，`--manifest-path software/bsp` 会另生 lock 并需 `CARGO_BUILD_TARGET`，本轮风险大于收益（记 R12）。
+- 行为基线：合并前后 `arch`（I1/I2/I3/I4/I7）、`hygiene`（H2/H4/H5/H6）、`test`（136）输出一致。
+- 迁移完成：`checks.rs`/`hygiene.rs` 的走查与路径显示；`main.rs` 三处命令分发与 help。
+- 删除的旧实现：`checks.rs:collect_rs`、`hygiene.rs:{collect_rs, display}`。
+- 防回归约束：`fmt-check`/`clippy` 现在覆盖 `software/xtask` 本身；工具里的格式/lint 退化会直接 FAIL。
+- 验证：`fmt-check`/`clippy`/`arch`/`hygiene`/`test`/`doc` 全 PASS（提交回执）。
+- 未决项：`bsp` 的 fmt/clippy 覆盖（R12）；门禁命令仍无自测（`xtask` 零测试）。
 
 ---
 

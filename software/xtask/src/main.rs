@@ -7,6 +7,7 @@
 //!           hygiene tier help
 
 mod checks;
+mod fs;
 mod hygiene;
 mod tier;
 
@@ -15,6 +16,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus};
 
 pub(crate) const FW: &str = "software/firmware";
+
+/// 门禁工具自己的 workspace 根；`fmt-check`/`clippy` 也必须覆盖它。
+pub(crate) const XTASK: &str = "software/xtask";
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -25,22 +29,28 @@ fn main() -> ExitCode {
         "check" => cargo(&["check"]),
         "build" => cargo(&["build"]),
         "rel" | "release" => cargo(&["build", "--release"]),
-        "fmt" => cargo(&["fmt", "--all"]),
-        "fmt-check" => cargo(&["fmt", "--all", "--", "--check"]),
+        "fmt" => cargo(&["fmt", "--all"])
+            .and_then(|()| root_cargo(&["fmt", "--all"]))
+            .and_then(|()| xtask_cargo(&["fmt", "--all"])),
+        "fmt-check" => cargo(&["fmt", "--all", "--", "--check"])
+            .and_then(|()| root_cargo(&["fmt", "--all", "--", "--check"]))
+            .and_then(|()| xtask_cargo(&["fmt", "--all", "--", "--check"])),
         // `--all-targets` pulls in the test harness, which needs std on a
         // no_std thumb target; the firmware has one bin and no lib.
-        // 根 workspace（算法层）也要过：`-D warnings` 把文档与 clippy 提示
-        // 一律升级为错误，测试目标同样拦。
-        "clippy" => cargo(&["clippy", "--bins", "--", "-D", "warnings"]).and_then(|()| {
-            root_cargo(&[
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--",
-                "-D",
-                "warnings",
-            ])
-        }),
+        // 根 workspace（算法层）与 xtask 也要过：`-D warnings` 把文档与 clippy
+        // 提示一律升级为错误，测试目标同样拦。
+        "clippy" => cargo(&["clippy", "--bins", "--", "-D", "warnings"])
+            .and_then(|()| {
+                root_cargo(&[
+                    "clippy",
+                    "--workspace",
+                    "--all-targets",
+                    "--",
+                    "-D",
+                    "warnings",
+                ])
+            })
+            .and_then(|()| xtask_cargo(&["clippy", "--all-targets", "--", "-D", "warnings"])),
         // 根 workspace（host crate）的回归测试，不是 firmware。
         "test" => root_cargo(&["test", "--workspace"]),
         // 文档门禁：根 workspace 全量 rustdoc，任何警告即失败。
@@ -96,10 +106,11 @@ usage: cargo xtask <command> [args]
   check       cargo check (dev profile)
   build       cargo build (dev profile)
   rel         cargo build --release           (the acceptance profile)
-  fmt         cargo fmt --all
-  fmt-check   cargo fmt --all -- --check      (CI)
+  fmt         cargo fmt --all                (firmware + root + xtask)
+  fmt-check   cargo fmt --all -- --check      (CI; same three workspaces)
   clippy      cargo clippy --bins -- -D warnings   (firmware)
               then cargo clippy --workspace --all-targets -- -D warnings (root)
+              then cargo clippy --all-targets -- -D warnings (xtask)
   test        cargo test --workspace         (root workspace, host)
   doc         cargo doc --no-deps --workspace (RUSTDOCFLAGS=-D warnings)
   size        build --release, then print ELF sections and flash image
@@ -134,6 +145,14 @@ fn cargo(args: &[&str]) -> Result<(), String> {
 /// Runs cargo in the repo root workspace (contracts + algorithms), not firmware.
 fn root_cargo(args: &[&str]) -> Result<(), String> {
     run(Command::new("cargo").args(args))
+}
+
+/// Runs cargo in `software/xtask`（独立 host workspace）。门禁工具自己也要过门禁：
+/// 否则 `fmt-check`/`clippy` 永远检查不到写检查器的那份代码。
+fn xtask_cargo(args: &[&str]) -> Result<(), String> {
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(XTASK).args(args);
+    run(&mut cmd)
 }
 
 /// `cargo doc` 零警告：rustdoc 警告一律升级为错误。

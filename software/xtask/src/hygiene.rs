@@ -7,6 +7,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::fs::{collect_rs, rel};
+
 const SCAN_ROOTS: [&str; 4] = [
     "software/contracts/src",
     "software/bsp/src",
@@ -68,7 +70,7 @@ fn check_todo_ownership() -> CheckResult {
     let mut scanned = 0usize;
 
     for file in &files {
-        let path = display(file);
+        let path = rel(file);
         let src = read(file)?;
         scanned += 1;
         for (idx, raw) in src.lines().enumerate() {
@@ -111,7 +113,7 @@ fn check_comment_markers() -> CheckResult {
     let mut scanned = 0usize;
 
     for file in &files {
-        let path = display(file);
+        let path = rel(file);
         let src = read(file)?;
         scanned += 1;
         for (idx, raw) in src.lines().enumerate() {
@@ -178,7 +180,7 @@ fn check_module_docs() -> CheckResult {
     let mut dirs: Vec<String> = files
         .iter()
         .filter_map(|file| {
-            display(file)
+            rel(file)
                 .split_once("/src/")
                 .map(|(dir, _)| dir.to_string())
         })
@@ -190,7 +192,7 @@ fn check_module_docs() -> CheckResult {
     let mut hits = Vec::new();
     let mut scanned = 0usize;
     for file in &files {
-        let path = display(file);
+        let path = rel(file);
         let Some((dir, rest)) = path.split_once("/src/") else {
             hits.push(format!("{path}：不在 <crate>/src/ 下，无法归属文件树"));
             continue;
@@ -228,10 +230,7 @@ struct ModuleRow {
 fn check_module_registry() -> CheckResult {
     let doc = std::fs::read_to_string(ARCH_DOC)
         .map_err(|e| (format!("无法读取 {ARCH_DOC}"), vec![e.to_string()]))?;
-    let rows = match parse_module_registry(&doc) {
-        Ok(rows) => rows,
-        Err(e) => return Err(e),
-    };
+    let rows = parse_module_registry(&doc)?;
     let files = rust_files()?;
 
     let mut hits = Vec::new();
@@ -268,7 +267,7 @@ fn check_module_registry() -> CheckResult {
 
     let mut scanned = 0usize;
     for file in &files {
-        let path = display(file);
+        let path = rel(file);
         if is_module_tree_file(&path) {
             continue;
         }
@@ -498,25 +497,9 @@ fn rust_files() -> Result<Vec<PathBuf>, (String, Vec<String>)> {
     Ok(files)
 }
 
-fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            collect_rs(&path, out)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
 fn read(file: &Path) -> Result<String, (String, Vec<String>)> {
     std::fs::read_to_string(file)
-        .map_err(|e| (format!("无法读取 {}", display(file)), vec![e.to_string()]))
-}
-
-fn display(file: &Path) -> String {
-    file.to_string_lossy().replace('\\', "/")
+        .map_err(|e| (format!("无法读取 {}", rel(file)), vec![e.to_string()]))
 }
 
 fn locate(path: &str, idx: usize, line: &str, why: &str) -> String {

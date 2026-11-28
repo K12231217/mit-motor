@@ -44,6 +44,9 @@
 
 ### 1.2 模块注册表（机器校验）
 
+`software/xtask` 是 host 工具，不在注册表内：四轴 layer 闭集没有 `tool`，它不是发货固件的一部分。
+它由 `cargo xtask fmt-check` / `clippy` 自身覆盖（同一份工具不给自己留门禁外的地盘）。
+
 H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一且四轴合法、owner/contract 非空。
 表是模块名与所有权的唯一真源；`cargo xtask hygiene` 失败即阻断。
 
