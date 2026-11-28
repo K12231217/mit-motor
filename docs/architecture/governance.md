@@ -77,6 +77,11 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 （`bus_adc.rs:15,26`），非第二份数值；`sqrt_f32` 只有一个实现（`service_math.rs:19`），
 `service_gate/math.rs` 只留常量与 `powi`。
 
+未用 `pub const` 审计（轮次 11）：`config_motor.rs` 的 `NOMINAL_*`/`STALL_*`、`config_policy.rs` 的
+`AMP_FLOOR_*`/`CALIB_TICK_MS`、`protocol_icd.rs` 的 `LSB_*`/`NODE_ADDR_MIN`/`TTL_MS_NONE` 在当前树
+没有调用方，但它们是**铭牌与线协议事实**（PRE-07 的唯一来源），不是重复实现，不删。
+唯一删掉的是把 4 bit 编码器字段说成四个独立布尔位的 `ENC1_OK_BIT` 等常量。
+
 ### 5. 技术方案并存
 
 | 领域 | 并存方案 | 范围 | 收敛结论 |
@@ -134,9 +139,11 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R9 | `main.rs` 5 处 `trace.freeze(); defmt::error!; loop spin` 故障停机副本 | B（Tier B） | (a) 提取 `halt_with_fault(code)` 单点；(b) 留在 `init` 内联 | (a) |
 | R10 | 文档级引脚 lint（`P[A-D]\d+` 只许出现在 HR §3.1） | A | (a) 加 hygiene 规则 + 白名单；(b) 不加，靠 PRE-10 人工检查 | (b) 先评估误报率 |
 | R11 | firmware/bsp 注释级纠偏（`TRACE_FLAG_SELFTEST` 悬空 link、`bus_pwm.rs:101` 的 PB10 措辞） | B（Tier B，注释级） | (a) 与 R8/R9 同批做，一次 HIL 签收；(b) 单独做并标 `PENDING_HIL` | (a) |
-| R12 | `bsp` 的 fmt/clippy 覆盖（thumb crate，当前无人检查） | A | (a) 以 `CARGO_BUILD_TARGET=thumbv7em-none-eabihf --manifest-path software/bsp/Cargo.toml` 跑；(b) 让 firmware 的 `-p bsp` 生效需先并入同一 workspace（会破坏独立 workspace 约定） | (a) 评估构建副作用 |
+| R12 | `bsp` 的 fmt/clippy 覆盖 | A | (a) 以 `CARGO_BUILD_TARGET=thumbv7em-none-eabihf --manifest-path software/bsp/Cargo.toml` 跑；(b) 让 firmware 的 `-p bsp` 生效需先并入同一 workspace（会破坏独立 workspace 约定） | (a) 评估构建副作用 |
+| R13 | `tier` 对注释级 bsp/firmware 改动也要求 HIL（路径粒度） | A | (a) 行级判断"只改注释则跳过"；(b) 接受摩擦，人决定是否开 hil-pending 分支 | (b) 不用启发式 |
+| R14 | `LSB_*` 等线协议常量未被编码函数引用 | A | (a) 编码/解码引用 `1.0/LSB_*`；(b) 保持内联，在常量上注明"文档值" | (b) 不碰 wire 语义 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；架构文档 §4–§10 纠偏完成（轮次 10）；R3 hold（§9-1）；R7/R9–R11 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；架构文档 §4–§10 纠偏完成（轮次 10）；状态字表示归一完成（轮次 11）；R3 hold（§9-1）；R7/R9–R11、R14 待做。
 
 ### 9. 待确认（人）
 
@@ -343,6 +350,25 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：无新增机器检查；§9 的指针表由人工对照 `checks.rs`（可机器化的部分已在 `arch` 本身）。
 - 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
 - 未决项：§5 的 `system` 边界（crate 未建）仍按计划保留；§6 的 `idle 不可达` 等 RTIC 细节待 `app` 落地复核。
+
+---
+
+## 轮次 11：删掉状态字的第二套表示，并做一次"未用 pub const"审计
+
+- 熵源：§4 证伪记录扩展；PRE-07（同一语义只有一种表示）
+- 调用方核实：
+  - `grep -rn "ENC1_OK_BIT\|ENC1_FAULT_BIT\|ENC2_OK_BIT\|ENC2_FAULT_BIT"` 全仓只命中定义行，零调用。
+  - 这四位与 `ENCODER_SHIFT`/`ENCODER_MASK`/`StatusWord::encoder_bits()` 描述同一 4 bit 字段，且语义冲突（字段是**一个码**，不是四个布尔位）。
+  - 批量扫描 `pub const` 的零引用项：另外 22 个（`NOMINAL_*`、`LSB_*`、`AMP_FLOOR_*` 等）是铭牌与线协议事实，保留。
+  - `algorithms/src/lib.rs:20` 仍说 `sqrt_f32` 在 `service_gate` 内（实际已上移 `service_math`）；`contracts/src/lib.rs:15` 仍说跨优先级"只有"两种通道（ADR-16 已有例外）。
+- 选定方案：删四个 `ENC*_BIT`，在 `ENCODER_MASK` 上写明"4 bit 码，不要加位别名"；两处 crate 根文档改为当前事实。
+- 放弃方案：保留四位并加编译期断言把它们与 `ENCODER_SHIFT` 对齐 —— 等于给错误表示发合法性证书。
+- 行为基线：纯常量/文档删除；`test`（44+92）与 golden words 不变。
+- 迁移完成：`protocol_faults.rs`、`algorithms/src/lib.rs`、`contracts/src/lib.rs`。
+- 删除的旧实现：`ENC1_OK_BIT`、`ENC1_FAULT_BIT`、`ENC2_OK_BIT`、`ENC2_FAULT_BIT`。
+- 防回归约束：无新增机器检查（`ENCODER_MASK` 的注释是唯一防线）；删除后无引用即可编译期证明无调用方。
+- 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
+- 未决项：`LSB_*` 等未用常量是否应被编码函数引用（当前函数内联了同等比例），改动会触碰 wire 语义，另开任务（R14）。
 
 ---
 

@@ -17,8 +17,8 @@
 //!
 //! 状态都在 `GainGate` 与 `EncoderMonitor` 里，无堆、`forbid(unsafe_code)`，禁止
 //! `unwrap` / `expect` / 数组下标（见下方属性）。`no_std` 只在非测试构建启用：单测跑
-//! std，固件目标是纯 `core`，因此 `sin` / `cos` / `sqrt` 一律不外调
-//! （`motor::service_math` 与 `service_gate` 内的 `sqrt_f32`）。
+//! std，固件目标是纯 `core`，因此 `sin` / `cos` / `sqrt` 一律不外调（原语只在
+//! `motor::service_math`）。
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]

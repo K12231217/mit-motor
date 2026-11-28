@@ -133,15 +133,10 @@ pub const CONSISTENT_BIT: u32 = 10;
 /// 编码器状态字段起始位。
 pub const ENCODER_SHIFT: u32 = 11;
 /// 编码器状态字段掩码（4 bit）。
+///
+/// 11–14 是**一个 4 bit 无符号码**（[`StatusWord::encoder_bits`]），不是四个独立布尔位；
+/// 别再为它加 `ENCx_OK_BIT` 之类的别名，那会让读数分叉。
 pub const ENCODER_MASK: u32 = 0xF;
-/// E1 采样 OK。
-pub const ENC1_OK_BIT: u32 = 11;
-/// E1 异常（CRC/无响应）。
-pub const ENC1_FAULT_BIT: u32 = 12;
-/// E2 采样 OK。
-pub const ENC2_OK_BIT: u32 = 13;
-/// E2 异常。
-pub const ENC2_FAULT_BIT: u32 = 14;
 /// 命令拒绝位：最近一条下行命令被状态机拒绝。
 ///
 /// 位 15 是编码器字段（11–14）与故障码字段（16–23）之间唯一空闲位。拒绝原因本身走慢帧

@@ -12,8 +12,9 @@
 //!
 //! # 通道
 //!
-//! 跨优先级只有 [`joint::protocol_snapshot`] 的 seqlock 与 [`joint::protocol_events`]
-//! 的有界队列（PRE-04），都是单写者。
+//! 跨优先级的**控制**数据只有 [`joint::protocol_snapshot`] 的 seqlock 与
+//! [`joint::protocol_events`] 的有界队列（PRE-04），都是单写者。只读诊断数据（录波环、
+//! 原子计数）按 ADR-16 例外处理，见 `docs/software-architecture.md` §3.4。
 
 #![no_std]
 #![forbid(unsafe_code)]
