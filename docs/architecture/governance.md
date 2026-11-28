@@ -451,6 +451,24 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 
 ---
 
+## 轮次 16：bsp 编码器层跑通（软件片选，无磁铁）
+
+- 目标：SPI1 + 两片 MT6701 原始帧读取，软件片选（HR-108：两个 CS 各 10 kΩ 上拉）。
+- 一手材料：MT6701 Rev.1.8 §7.8.1 / Figure-24：CSN 低起始、DO 上升沿更新/下降沿采样、TH ≥ 100 ns、TCLK ≥ 64 ns、T_PwrUp ≤ 32 ms。
+- 实现：`bsp.motor.bus_encoder` = `Spi::new_rxonly`（`NoDma`，只读 3 线）+ 两个 `Output` CS；`read_raw(id) -> Option<[u8;3]>`，SPI 错误返回 `None` 由调用方计丢帧；CS 低后等 ~1 µs（TH 余量）。帧解析仍走 `algorithms::motor::service_encoder::parse`（CRC-6 是判据）。
+- 实测（两片已焊、无磁铁、无电机）：
+  - 复位后 ~60 µs 立即读：`crc_ok=0/8`（未到 T_PwrUp）→ 加 35 ms 等待后正常。
+  - 模式扫描（同一固件逐模式 8 帧）：Mode 0/2/3 全 `0/8`，**Mode 1 两片均 `8/8`** → 锁定 `MODE_1`。手册 Figure-24 写"无传输时 CLK 为高"，与本板实测不符，以实测为准并写进模块注释。
+  - 最终固件：`enc id=1 spi_ok=8/8 crc_ok=8/8 last=0x8682b6 mag=10`；`id=2 … 0x88be9d mag=10`。
+  - `mag=10`：`Mg[1:0]=2`（磁场过弱）、`Mg[3]=1`（失锁/超速位，手册语义不确定）⇒ 无磁铁时角度不可用。
+- 结论：**SPI 时序、软件片选、CRC 链路通**；角度语义（零位、跳变、双编码器切换、20 kHz 内读取）必须装磁铁/电机后再验。
+- 迁移：registry `bsp.motor.bus_encoder` scaffold→impl；bsp lib 文档；architecture §2 描述；handoff 新开 T-016（T-012 关闭，证据仍在 §3）。
+- 删除：临时 `set_mode` 调试方法与四模式扫描（只留 git 历史）。
+- 验证：`rel` 通过（flash 30,672 B / 46.8 %，+2 KB）；`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene`/`tier` 全 PASS（提交回执）。
+- 未决项：磁铁装配后的角度/磁码判据；SPI1 是否进 20 kHz 任务（ADR-08）待 FOC 集成；`cargo xtask build`（dev profile）链接溢出属既有问题，验收构型用 `rel`。
+
+---
+
 ## 轮次记录模板（下一轮起复制）
 
 ```md

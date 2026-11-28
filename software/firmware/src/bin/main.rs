@@ -27,6 +27,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use algorithms::{GainGate, GateParams};
 use bsp::motor::bus_adc::{Adc, AdcPins, AMPS_PER_LSB};
+use bsp::motor::bus_encoder::{Encoder, EncoderId, EncoderPins};
 use bsp::motor::bus_pwm::{Pwm, PwmPins};
 use bsp::motor::service_clock;
 use bsp::motor::service_dwt::Dwt;
@@ -127,6 +128,52 @@ mod app {
             },
             TRACE_R_FULL_SCALE_AMPS,
         );
+
+        // 编码器 bring-up：两片 MT6701 已焊、暂无磁铁。这里只验证软件片选/SPI 时序与
+        // CRC；角度语义（零位、跳变、磁场码）要等磁铁装好再测。SPI1 用完即交还，
+        // FOC 落地后由 20 kHz 任务独占（ADR-08）。
+        //
+        // MT6701 的 T_PwrUp 上限 32 ms（Rev.1.8 §5）；3V3 与 MCU 同时上电，复位后
+        // 立即读会拿到未就绪的 DO。`asm::delay` 每圈约 3 周期，2e6 圈 ≈ 35 ms。
+        cortex_m::asm::delay(2_000_000);
+        let mut enc = Encoder::new(
+            EncoderPins {
+                spi: p.SPI1,
+                sck: p.PB3,
+                miso: p.PB4,
+                cs1: p.PC12,
+                cs2: p.PC10,
+            },
+            algorithms::motor::config_policy::ENC_SPI_HZ,
+        );
+        for id in [EncoderId::E1, EncoderId::E2] {
+            let mut spi_ok = 0u32;
+            let mut crc_ok = 0u32;
+            let mut last = 0u32;
+            let mut angle = 0u16;
+            let mut mag = 0u8;
+            for _ in 0..8 {
+                if let Some(raw) = enc.read_raw(id) {
+                    spi_ok += 1;
+                    last = (u32::from(raw[0]) << 16) | (u32::from(raw[1]) << 8) | u32::from(raw[2]);
+                    if let Ok(frame) = algorithms::motor::service_encoder::parse(raw) {
+                        crc_ok += 1;
+                        angle = frame.angle_raw;
+                        mag = frame.mag;
+                    }
+                }
+            }
+            defmt::info!(
+                "enc id={=u8} spi_ok={=u32}/8 crc_ok={=u32}/8 last=0x{=u32:x} ang={=u16} mag={=u8}",
+                id.number(),
+                spi_ok,
+                crc_ok,
+                last,
+                angle,
+                mag
+            );
+        }
+        drop(enc);
 
         let mut pwm = Pwm::init(
             p.TIM1,

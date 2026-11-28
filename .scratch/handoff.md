@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | T-015 | B | 20 kHz current task：TIM1_UP → OPAMP/ADC → GainGate 残差 → DAC/TP_SYNC/录波 | T-014 HIL 后 | **HIL PASS（ADC/rate/DAC/freeze；2026-11-28 无电机复跑）**：`adc0≈2039`、`r_lsb∈{-1,0,1}`、`isr_count=20004/s`、`isr_cycles=692`（MOE=0）/1789（MOE=1）；`--enable-zero` 时 `trigger=true locked=true`；TP1=1.2623 V、TP2=2.496 V；六路门极/死区波形未测 |
 | T-014 | B | trace 基础设施：PB6/PB7 TP_SYNC、DAC1_OUT1 残差/OUT2 冻结、TIM5 1 MHz、DWT、512/1536 预/后触发环与 `stride` | T-012 HIL 后 | **HIL: PASS（RTT/寄存器）**：`recorder pre=512 post=1536 len=2048`；stride 1/10 均锁存；物理 DAC/TP_SYNC 未测 |
-| T-012 | B | `bsp` clock + pwm：HSE 16M/PLL 170M 读回；TIM1 20 kHz/500 ns；按 2026-11-27 网表 nSLEEP PC7、nFAULT PC8、无 BKIN | `4f67b32`（T-011 脚手架） | **HIL: PASS（safe-off）**：RTT `clock=ok`、`pwm=ok arr=4250 dtg=85 moe/aoe/bke=false`；定时器/死区已按 RM0440 对照（RCR=1、DTG=85→500 ns），`enable` 门极波形不测；低边窗口按互补 PWM 默认三相同时；仅使用 TP1/TP2/PB6/PB7；硬件过压 break 已裁决不补（ADR-18） |
+| T-016 | A | 编码器 bring-up：SPI1 软件片选 + 两片 MT6701 原始帧（无磁铁、无电机） | T-012 关闭后 | **HIL PASS（SPI/CRC）**：两片各 8/8 帧 CRC 通过；SPI Mode 1 实测（Mode 0/2/3 全 0）；T_PwrUp 后需等 ≥32 ms 再读；`mag=10`（弱场 + 失锁位），无磁铁角度无意义；角度/零位/跳变待装磁铁 |
 
 ## 2. 当前工作区
 
@@ -72,6 +72,14 @@ HIL: PASS 2026-11-28 T-015 零矢量使能复跑（无电机，`cargo xtask hil 
 - 1 s 汇总：`isr_cycles=1789 isr_count=20003`（< 25 µs 预算）；`recorder pre=512 post=1536 len=2048 total=3536 trigger=true locked=true stride=1`。
 - DATA 帧：`ia/ib/ic≈2039`（零位 2039），`r_lsb ∈ {-1,0,1}`，`flags=0`。
 - 未测：六路门极/死区物理波形、电机负载。
+
+HIL: PASS 2026-11-28 T-016 编码器 SPI bring-up（两片 MT6701 已焊、无磁铁、无电机）
+
+- `cargo xtask hil`：`enc id=1 spi_ok=8/8 crc_ok=8/8 last=0x8682b6 ang=8608 mag=10`；`enc id=2 … 0x88be9d ang=8751 mag=10`。
+- 模式扫描（同一固件逐模式 8 帧）：Mode 0/2/3 均 `crc_ok=0/8`，**Mode 1 两片均 8/8**；已按实测锁定 `MODE_1`（手册 Figure-24 的"空闲 CLK 高"表述与本板不符）。
+- 复位后 60 µs 读会全错（`crc_ok=0/8`），等 35 ms（T_PwrUp 上限 32 ms）后正常 ⇒ 上电等待是必要条件。
+- `mag=10`：`Mg[1:0]=2`（磁场过弱）、`Mg[3]=1`（失锁/超速位，手册语义不确定）；无磁铁时角度不可用。
+- 未做：磁铁装配后的角度线性/零位/跳变、双编码器切换时序、20 kHz 任务内读取（SPI1 目前 init 用完即释放）。
 
 ## 4. 待裁决（人）
 

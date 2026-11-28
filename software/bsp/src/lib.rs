@@ -4,8 +4,8 @@
 //! （AGENTS §1.1 MECH-01/03）。本 crate 是 `unsafe` 白名单；其余 crate 保持
 //! `forbid(unsafe_code)`。
 //!
-//! `service_clock`、`bus_pwm`、`bus_adc`、`service_dwt`、`service_timebase`、
-//! `service_trace` 已实现；`bus_encoder` 与 `init()` 仍是 `todo!()`。
+//! `service_clock`、`bus_pwm`、`bus_adc`、`bus_encoder`、`service_dwt`、
+//! `service_timebase`、`service_trace` 已实现；只有 `init()` 仍是 `todo!()`。
 //! `software/firmware/src/bin/main.rs` 目前手工按序装配这些驱动，不调用 `init()`。
 
 #![no_std]
