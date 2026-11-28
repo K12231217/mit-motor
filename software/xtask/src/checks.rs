@@ -430,3 +430,59 @@ fn llvm_nm() -> Result<PathBuf, String> {
         .join("bin");
     tool(&bin, "llvm-nm")
 }
+
+#[cfg(test)]
+mod tests {
+    //! 门禁的判据本身也要有反例：I4 的锚点或花括号配对写错时，
+    //! 正确的代码会 PASS、错误的代码也会 PASS，这比没有检查更危险。
+
+    use super::{isr_body, strip_strings};
+
+    /// 外层是真实的 `#[task]` 锚点，`monitor` 里的 `defmt` 必须落在区间之外。
+    const SNIPPET: &[&str] = &[
+        "    #[task(binds = TIM1_UP_TIM16, priority = 8, local = [current])]",
+        "    fn current(cx: current::Context) {",
+        "        let text = \"{ not a brace }\";",
+        "        if cx.local.current.samples > 0 {",
+        "            let _ = text;",
+        "        }",
+        "    }",
+        "",
+        "    #[task(priority = 1)]",
+        "    async fn monitor(_cx: monitor::Context) {",
+        "        defmt::info!(\"outside\");",
+        "    }",
+    ];
+
+    #[test]
+    fn isr_body_covers_only_the_tim1_task() {
+        let (start, end) = isr_body(SNIPPET).expect("anchor must be found");
+        assert_eq!(start, 1);
+        assert_eq!(end, 6);
+        assert!(SNIPPET[start..=end]
+            .iter()
+            .any(|l| l.contains("samples > 0")));
+        assert!(!SNIPPET[start..=end].iter().any(|l| l.contains("monitor")));
+    }
+
+    #[test]
+    fn isr_body_requires_the_binds_anchor() {
+        let no_anchor = ["    fn current(cx: current::Context) {", "    }"];
+        assert!(isr_body(&no_anchor).is_none());
+
+        let unclosed = [
+            "    #[task(binds = TIM1_UP_TIM16)]",
+            "    fn current(cx: current::Context) {",
+        ];
+        assert!(isr_body(&unclosed).is_none());
+    }
+
+    #[test]
+    fn strip_strings_hides_braces_inside_literals() {
+        assert_eq!(
+            strip_strings("let s = \"{\"; let t = 1;"),
+            "let s = ; let t = 1;"
+        );
+        assert_eq!(strip_strings("/* { */ let x = 1;"), "/* { */ let x = 1;");
+    }
+}

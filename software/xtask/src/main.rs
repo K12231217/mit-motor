@@ -58,8 +58,8 @@ fn main() -> ExitCode {
             .and_then(|()| xtask_cargo(&["clippy", "--all-targets", "--", "-D", "warnings"]))
             // bsp 是 no_std lib：`--all-targets` 会拉 host 测试装置而链接失败，只查 lib。
             .and_then(|()| bsp_cargo(&["clippy", "--", "-D", "warnings"])),
-        // 根 workspace（host crate）的回归测试，不是 firmware。
-        "test" => root_cargo(&["test", "--workspace"]),
+        // 根 workspace（host crate）的回归测试，不是 firmware；xtask 的检查器也要自测。
+        "test" => root_cargo(&["test", "--workspace"]).and_then(|()| xtask_cargo(&["test"])),
         // 文档门禁：根 workspace 全量 rustdoc，任何警告即失败。
         "doc" => doc_check(),
         "size" => size(),
@@ -120,6 +120,7 @@ usage: cargo xtask <command> [args]
               then cargo clippy --all-targets -- -D warnings (xtask)
               then cargo clippy -- -D warnings (bsp; no_std lib has no host tests)
   test        cargo test --workspace         (root workspace, host)
+              then cargo test (xtask checker self-tests)
   doc         cargo doc --no-deps --workspace (RUSTDOCFLAGS=-D warnings)
   size        build --release, then print ELF sections and flash image
               against the FLASH length in software/firmware/memory.x

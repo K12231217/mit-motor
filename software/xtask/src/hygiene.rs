@@ -549,3 +549,46 @@ fn read(file: &Path) -> Result<String, (String, Vec<String>)> {
 fn locate(path: &str, idx: usize, line: &str, why: &str) -> String {
     format!("{path}:{}: {why}\n            {}", idx + 1, line.trim())
 }
+
+#[cfg(test)]
+mod tests {
+    //! H6 的格式与 state 判据必须有反例：注册表是"哪个模块、谁拥有、是否落地"的唯一真源，
+    //! 解析器放宽一格，文档就可以悄悄说谎。
+
+    use super::{parse_module_registry, todo_state, REGISTRY_END, REGISTRY_START};
+
+    fn doc(rows: &str) -> String {
+        format!(
+            "{REGISTRY_START}\n| module id | path | owner | state | contract |\n|---|---|---|---|---|\n{rows}\n{REGISTRY_END}\n"
+        )
+    }
+
+    #[test]
+    fn registry_rows_need_five_columns() {
+        let ok = doc("| `lib.motor.chain_pid` | `software/algorithms/src/motor/chain_pid.rs` | `current @8` | impl | PI |");
+        let rows = parse_module_registry(&ok).expect("5 columns must parse");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].state, "impl");
+        assert_eq!(rows[0].owner, "current @8");
+
+        let bad = doc("| `lib.motor.chain_pid` | `software/algorithms/src/motor/chain_pid.rs` | `current @8` | PI |");
+        assert!(parse_module_registry(&bad).is_err());
+    }
+
+    #[test]
+    fn todo_state_ignores_doc_mentions() {
+        let dir = std::env::temp_dir().join(format!("mit-motor-hygiene-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+
+        let mention = dir.join("mention.rs");
+        std::fs::write(&mention, "//! still todo!() here\npub fn f() {}\n").expect("write");
+        assert!(!todo_state(mention.to_str().expect("utf-8 path")).expect("scan"));
+
+        let stub = dir.join("stub.rs");
+        std::fs::write(&stub, "pub fn f() {\n    todo!()\n}\n").expect("write");
+        assert!(todo_state(stub.to_str().expect("utf-8 path")).expect("scan"));
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+}

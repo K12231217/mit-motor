@@ -143,7 +143,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R13 | `tier` 对注释级 bsp/firmware 改动也要求 HIL（路径粒度） | A | (a) 行级判断"只改注释则跳过"；(b) 接受摩擦，人决定是否开 hil-pending 分支 | (b) 不用启发式 |
 | R14 | `LSB_*` 等线协议常量未被编码函数引用 | A | (a) 编码/解码引用 `1.0/LSB_*`；(b) 保持内联，在常量上注明"文档值" | (b) 不碰 wire 语义 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；架构文档 §4–§10 纠偏完成（轮次 10）；状态字表示归一完成（轮次 11）；R3 hold（§9-1）；R7/R9–R11、R14 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；架构文档 §4–§10 纠偏完成（轮次 10）；状态字表示归一完成（轮次 11）；检查器自测完成（轮次 12）；R3 hold（§9-1）；R7/R9–R11、R13/R14 待做。
 
 ### 9. 待确认（人）
 
@@ -369,6 +369,23 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：无新增机器检查（`ENCODER_MASK` 的注释是唯一防线）；删除后无引用即可编译期证明无调用方。
 - 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
 - 未决项：`LSB_*` 等未用常量是否应被编码函数引用（当前函数内联了同等比例），改动会触碰 wire 语义，另开任务（R14）。
+
+---
+
+## 轮次 12：门禁检查器自测（I4 锚点 / H6 格式与 state）
+
+- 熵源：§7「测试与工具链」行（`xtask` 零测试）
+- 调用方核实：
+  - `isr_body` 是手写花括号配对 + 字符串剥离；`parse_module_registry` 是手写 5 列解析；`todo_state` 用手写行首判定。三者任一放宽，正确的代码仍 PASS、错误的代码也 PASS。
+  - `cargo xtask test` 此前只跑根 workspace，`software/xtask` 的测试即使存在也不会被执行（与轮次 5 的 fmt/clippy 漏洞同源）。
+- 选定方案：`checks.rs` 加 3 例（锚点缺失、未闭合、字符串里的花括号、`monitor` 必须在区间外）；`hygiene.rs` 加 2 例（4 列必须报错、`//! todo!()` 不算桩而裸 `todo!()` 算）；`cargo xtask test` 追加 xtask 一跳。
+- 放弃方案：为一个 60 行的刮擦器引入 `syn` —— 依赖体积与编译时间远超收益，且 ISR 体扫描只服务于一条 lint。
+- 行为基线：`cargo xtask test` 从 136 条变 141 条（+5）；根 workspace 条数不变。
+- 迁移完成：`main.rs` 的 `test` 分发与 help；两个检查模块的 `#[cfg(test)]`。
+- 删除的旧实现：无（补覆盖）。
+- 防回归约束：检查器行为回归会让 `cargo xtask test` FAIL；CI 已调用该命令。
+- 验证：`test`（141）/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
+- 未决项：`check_isr_purity` 的禁用词表（`defmt/.await/.lock(/unwrap(/expect(`）仍是文本匹配，宏展开后的形态不在覆盖内。
 
 ---
 
