@@ -403,8 +403,9 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 迁移完成：`docs/INDEX.md` §1、`.scratch/handoff.md` §2、`.github/workflows/ci.yml` 注释。
 - 删除的旧实现：无。
 - 防回归约束：无（数值与链接预算的权威在 `memory.x` 与 `cargo xtask size`）。
+- 复核：`cargo xtask size` 已用 `memory.x` 的 FLASH 长度（64 KiB）做硬失败（`main.rs` 的 `image > flash` 分支），实测 28,664 B / 43.7 %，所以"不得跨 bank"由区域长度间接保证，无需新增断言。
 - 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
-- 未决项：`cargo xtask size` 的预算检查仍是"打印 vs memory.x 长度"，没有把"不得跨 bank"写成断言。
+- 未决项：无。
 
 ---
 
