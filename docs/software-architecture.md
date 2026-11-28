@@ -5,16 +5,17 @@
 > **状态标记**：树中标 `[计划]` 的条目尚未实现；实际落地状态见 [as-built.md](archive/as-built.md)。
 > 本轮只定**文件与契约**，不落实现。
 
-## 1. 六条不变量（每条都有检查手段，不靠自觉）
+## 1. 七条不变量（机械化的写命令；未落地的显式标 `未落地`）
 
 | # | 不变量 | 检查 |
 |---|---|---|
-| I1 | 依赖单向：`{contracts} ← {bsp, system, algorithms} ← app` | `cargo tree -p algorithms` 里出现 `bsp` 即失败 |
-| I2 | `unsafe` 只出现在 `software/bsp/src/**` 与 `software/app/src/{fault,sections}.rs` | 其余 crate 根写 `#![forbid(unsafe_code)]`；CI 里 `grep -rn "unsafe"` 白名单 |
-| I3 | 无堆：链接产物无 `__rust_alloc` | `llvm-nm` 搜索结果为零；`cargo tree` 无 `alloc` 特性 |
-| I4 | 20 kHz 路径只由硬件事件驱动，**不含 `await`/`defmt`/锁** | `grep -n "await\|defmt\|mutex" software/app/src/tasks/current.rs` 为零 |
-| I5 | 跨优先级数据只用无锁快照/有界队列，满即丢并计数 | 每个队列有 `dropped` 计数器进状态字 |
-| I6 | 每个 ISR 有周期上界，实测值进遥测 | DWT 进出打点，`isr_cycles` 字段 |
+| I1 | 依赖单向：`{contracts} ← {bsp, system, algorithms} ← app` | `cargo xtask arch`：`cargo tree -p algorithms` 出现 `bsp`/`embassy-*`/`rtic` 即失败 |
+| I2 | `unsafe` 只出现在 `software/bsp/src/**` 与 `software/app/src/{fault,sections}.rs` | `cargo xtask arch`：扫 `contracts`/`algorithms`；其余 crate 根写 `#![forbid(unsafe_code)]` |
+| I3 | 无堆：链接产物无 `__rust_alloc` | `cargo xtask arch`：`llvm-nm` 扫 release ELF |
+| I4 | 20 kHz 路径只由硬件事件驱动，**不含 `await`/`defmt`/锁/解包** | `cargo xtask arch`：扫 `firmware/src/bin/main.rs` 的 TIM1 更新 ISR 体 |
+| I5 | 跨优先级数据只用无锁快照/有界队列，满即丢并计数 | **未落地**：队列还没有运行期调用方；落地时随 `dropped` 计数器一起加检查 |
+| I6 | 每个 ISR 有周期上界，实测值进遥测 | **未落地**：DWT 打点与 `isr_cycles` 已有，无自动预算检查 |
+| I7 | 状态迁移只有一处：`MotorState` 只在 `protocol_fsm.rs`、`service_fsm*` 与 crate 根 | `cargo xtask arch`：命名扫描，命中未登记文件即失败 |
 
 ### 1.1 模块标识：名字由四轴推导，不允许同义词
 

@@ -60,7 +60,7 @@ cargo xtask fmt-check   # rustfmt --check
 cargo xtask clippy      # firmware + 根 workspace 各一遍 clippy -D warnings
 cargo xtask rel         # release 构建（验收构型）
 cargo xtask size        # .text/.rodata/.data/.bss + 镜像 vs memory.x
-cargo xtask arch        # 架构不变量 I1/I2/I3（纯 Rust：software/xtask/src/checks.rs，不经 bash）
+cargo xtask arch        # 架构不变量 I1/I2/I3/I4/I7（纯 Rust：software/xtask/src/checks.rs，不经 bash）
 cargo xtask doc         # cargo doc --no-deps + RUSTDOCFLAGS=-D warnings（注释规范见 docs/archive/comment-style.md）
 cargo xtask hygiene     # H2 无主 TODO / H5 注释标记 / H4 文件架构 / H6 模块 ID 与 owner 注册表
 cargo xtask tier        # H3：Tier B 路径有改动且无 HIL 证据时 FAIL（基线缺省 origin/main 或 $TIER_BASE）
@@ -70,8 +70,8 @@ H1–H6 的判定边界与已知限制、S1–S3 软协议 → [`docs/archive/ag
 本节的命令是唯一入口，本文不复写实现细节。
 
 **未落地 —— 禁止在任何文档里当作"已有"引用**：`tools/replay`、`board.yaml`、`self_test`、
-`doc_check.py`、任何 HIL 结果；`system`/`app` 未建，`bsp` 是脚手架，`arch` 只实现 I1/I2/I3，
-I4–I6 无检查实现。新建它们属于 Thread 的一部分，落地后才进本节。
+`doc_check.py`、任何 HIL 结果；`system`/`app` 未建，`bsp` 的 `bus_encoder`/`Board::init`
+仍是 `todo!()`，`arch` 实现 I1/I2/I3/I4/I7，I5–I6 无检查实现。新建它们属于 Thread 的一部分，落地后才进本节。
 
 **Worker 交付封顶线（Level 2.5）**：上述命令全绿 + 回执附命令原文输出 + 触及文件清单。
 `cargo xtask tier` 报 Tier B 时，交付状态只能是 `PENDING_HIL`（不得写"已验证"）。

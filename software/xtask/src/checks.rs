@@ -25,7 +25,7 @@ struct Report {
     outcome: Outcome,
 }
 
-/// 跑三条检查并打印报告；有 FAIL 则返回错误（main 映射成退出码 1）。
+/// 跑全部检查并打印报告；有 FAIL 则返回错误（main 映射成退出码 1）。
 pub fn run() -> Result<(), String> {
     let reports = [
         Report {
@@ -39,6 +39,10 @@ pub fn run() -> Result<(), String> {
         Report {
             id: "I3",
             outcome: check_no_heap(),
+        },
+        Report {
+            id: "I4",
+            outcome: check_isr_purity(),
         },
         Report {
             id: "I7",
@@ -66,12 +70,12 @@ pub fn run() -> Result<(), String> {
         // 报告已经打印过，这里不再让 main 追加一条没信息量的 `xtask: `。
         Err(String::new())
     } else {
-        println!("arch_check: PASS —— I1/I2/I3/I7 全部通过");
+        println!("arch_check: PASS —— I1/I2/I3/I4/I7 全部通过");
         Ok(())
     }
 }
 
-/// I1 —— 依赖单向：`user` 只能依赖 `contracts`。
+/// I1 —— 依赖单向：`algorithms` 只能依赖 `contracts`。
 fn check_deps() -> Outcome {
     let output = Command::new("cargo")
         .args(["tree", "-p", "algorithms", "--prefix", "none"])
@@ -256,6 +260,108 @@ fn check_no_heap() -> Outcome {
             details: hits,
         }
     }
+}
+
+/// I4 —— 20 kHz 任务只由硬件事件驱动：ISR 函数体内无 `defmt`/`await`/锁/解包。
+///
+/// 只看 `#[task(binds = TIM1_UP…)]` 的函数体，不看整个文件：`init`/`monitor` 本来
+/// 就用 `defmt`。锚点找不到即 FAIL —— 任务改名或挪走不能让这条不变量悄悄失效。
+fn check_isr_purity() -> Outcome {
+    const SOURCE: &str = "software/firmware/src/bin/main.rs";
+    const NEEDLES: [&str; 5] = ["defmt", ".await", ".lock(", "unwrap(", "expect("];
+
+    let text = match std::fs::read_to_string(SOURCE) {
+        Ok(text) => text,
+        Err(e) => {
+            return Outcome::Fail {
+                summary: format!("无法读取 {SOURCE}"),
+                details: vec![e.to_string()],
+            }
+        }
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    let Some((start, end)) = isr_body(&lines) else {
+        return Outcome::Fail {
+            summary: format!("{SOURCE} 里找不到 `#[task(binds = TIM1_UP…)] fn current`"),
+            details: vec!["锚点改名后必须同步改本检查，不能降级成 N/A".to_string()],
+        };
+    };
+
+    let mut hits = Vec::new();
+    for (offset, line) in lines[start..=end].iter().enumerate() {
+        for needle in NEEDLES {
+            if line.contains(needle) {
+                hits.push(format!(
+                    "{SOURCE}:{}:{}",
+                    start + offset + 1,
+                    line.trim_end()
+                ));
+                break;
+            }
+        }
+    }
+
+    if hits.is_empty() {
+        Outcome::Pass(format!(
+            "{SOURCE}:{}–{end} 的 TIM1 更新 ISR 无 defmt/await/锁/解包",
+            start + 1
+        ))
+    } else {
+        Outcome::Fail {
+            summary: "20 kHz ISR 体内出现禁用构造：".to_string(),
+            details: hits,
+        }
+    }
+}
+
+/// 从 `#[task(binds = TIM1_UP…)]` 之后的 `fn current(` 起，按花括号配对截出函数体。
+fn isr_body(lines: &[&str]) -> Option<(usize, usize)> {
+    let anchor = lines
+        .iter()
+        .position(|line| line.contains("#[task(binds = TIM1_UP"))?;
+    let start = anchor + lines[anchor..].iter().position(|l| l.contains("fn current("))?;
+
+    let mut depth = 0i32;
+    let mut opened = false;
+    for (offset, line) in lines[start..].iter().enumerate() {
+        for ch in strip_strings(line).chars() {
+            match ch {
+                '{' => {
+                    depth += 1;
+                    opened = true;
+                }
+                '}' => depth -= 1,
+                _ => {}
+            }
+        }
+        if opened && depth == 0 {
+            return Some((start, start + offset));
+        }
+    }
+    None
+}
+
+/// 去掉字符串字面量，避免 `"{"`/`"}"` 干扰花括号配对。
+fn strip_strings(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut in_str = false;
+    let mut escaped = false;
+    for ch in line.chars() {
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_str = false;
+            }
+        } else if ch == '"' {
+            in_str = true;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 /// I7 —— 状态迁移只有一处：`MotorState` 只允许在 `fsm.rs`、其测试模块与 crate 根出现。

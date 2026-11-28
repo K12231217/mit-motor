@@ -126,6 +126,12 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R3 | `Board::init` vs `main.rs` 双装配 | B（Tier B） | (a) 删 `Board`/`init` 脚手架；(b) 实现并让 main 用它 | (a)（当前无人调用） |
 | R4 | 诊断通道入宪法 | A | (a) PRE-04 增"诊断通道"例外并写 ADR；(b) 改为 `Snapshot` | (a) |
 | R5 | H6 覆盖收紧（`mod.rs`/`bin` 不豁免） | A | (a) 要求 `bin/*/mod.rs` 也有注册项；(b) 只豁免 `src/**/mod.rs`，`bin` 例外单独列 | (a) |
+| R6 | HR 两套引脚表并存（§3 V2 历史 vs §3.1 最新网表） | A | (a) §3 表移入 `docs/archive/`，正文只留 §3.1；(b) 保留双表并加"冲突行"标注 | (a) |
+| R7 | I5/I6 落地 | B | (a) 队列有运行期调用方后再加检查与 `dropped` 计数；(b) 先写 `isr_cycles` 预算表 + 上限检查 | (b) 先做 I6 预算 |
+| R8 | `deadtime_dtg` 运行期 `assert!` → 编译期常量 | B（Tier B） | (a) `const DEADTIME_DTG: u8 = deadtime_dtg();`；(b) 保持现状 | (a) |
+| R9 | `main.rs` 5 处 `trace.freeze(); defmt::error!; loop spin` 故障停机副本 | B（Tier B） | (a) 提取 `halt_with_fault(code)` 单点；(b) 留在 `init` 内联 | (a) |
+
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R3 hold（§9-1）；R4/R6–R9 待做。
 
 ### 9. 待确认（人）
 
@@ -157,6 +163,31 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
   - H6 的 `/src/bin/` 前缀豁免改为显式 `BIN_FILES` 白名单（`hygiene.rs:398-412`）；新增 bin 子模块必须先登记
 - 验证：`cargo xtask hygiene` PASS（H2/H4/H5/H6）；`cargo xtask doc` PASS；`cargo xtask test` PASS
 - 未决项：R1 owner 方向（§9-3）；R2 文档数值收敛；R4 诊断通道
+
+---
+
+## 轮次 2：不变量从"文档声称"变成"命令可失败"
+
+- 熵源：§6「不变量清单」行、「PRE-07 数值唯一来源」行；§7「测试与工具链」行
+- 调用方核实：
+  - I4 的检查写在 `docs/software-architecture.md:15`，指向 `software/app/src/tasks/current.rs`；该路径不存在（`ls software/app` 为空），等于不变量零覆盖。
+  - I7 只在 §9 出现一行（`docs/software-architecture.md:386`），§1 表里没有它，AGENTS §2 仍写"arch 只实现 I1/I2/I3"。
+  - `software/xtask/src/checks.rs:78` 注释仍写旧 crate 名 `user`。
+  - INDEX §1 复写 5 个常量 + 4 组引脚 + 4 个 HIL 数字（PRE-07/PRE-10 双违反）。
+- 选定方案：
+  - `check_isr_purity`（I4）：从 `#[task(binds = TIM1_UP…)]` 之后按花括号配对截出 `fn current` 函数体，查 `defmt`/`.await`/`.lock(`/`unwrap(`/`expect(`；锚点找不到即 FAIL。
+  - §1 表补 I7，I5/I6 显式标 `未落地`，I1–I4/I7 写明是哪条命令。
+  - INDEX §1 的数值/引脚/HIL 数字全部换指针（`HSE_HZ`、`SYS_CLK_HZ`、`PWM_ARR`、`SOX_AMPS_PER_LSB`、HR §3.1、handoff §3）。
+- 放弃方案：
+  - (a) 给 `bsp` 加 `cargo tree -p bsp`：`software/bsp` 是 excluded 独立 workspace，`cargo tree --manifest-path` 会生成 `software/bsp/Cargo.lock` 这一新文件，副作用大于收益。
+  - (b) 给 INDEX 数字加 `doc_check` 比对：需要第二份"文档数值 ↔ 常量"映射表，把重复从文档搬到工具，Deletion Test 不通过。
+- 行为基线：改前 `cargo xtask arch` PASS（I1/I2/I3/I7）；改后 PASS（I1/I2/I3/I4/I7），I4 报 `main.rs:292–344`。
+- 迁移完成：I4 指向真实 ISR；I7 进 §1；INDEX 5 行换指针；AGENTS §2 命令描述与"未落地"清单同步。
+- 删除的旧实现：INDEX §1 的常量副本（170 MHz/ARR/0.2712 V·A⁻¹/2.25 mA·LSB⁻¹）、引脚副本、HIL 数字副本。
+- 防回归约束：`check_isr_purity` + `isr_body` + `strip_strings`（`checks.rs`）；ISR 改名会让 I4 FAIL 而不是静默跳过。
+- 反证：临时在 ISR 首行插入 `defmt::info!("falsify")` → I4 FAIL 并定位 `main.rs:293`；还原后 `git diff` 为空。
+- 验证：`arch`/`fmt-check`/`clippy`/`test`/`hygiene`/`doc` 全 PASS（命令原文见提交回执）。
+- 未决项：I5/I6 仍未落地；HR §3（V2 历史表）与 §3.1（最新网表）两套引脚表并存；`Board::init`；`deadtime_dtg` 运行期 assert。
 
 ---
 
