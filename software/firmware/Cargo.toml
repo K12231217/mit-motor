@@ -42,6 +42,16 @@ default = []
 hil-boot-freeze = []
 # HIL-only: enable TIM1 with zero modulation (no motor, current-limited).
 hil-enable-zero = []
+# HIL-only: drive EncoderMonitor with live frames plus precomputed valid frames
+# (weak field / jump / zero-frame / latch paths). No magnet needed.
+hil-encoder-fsm = []
+# HIL-only: log the safe-off snapshot, mark the nSLEEP->nFAULT window on PB6,
+# and report wake latency. Read-only: does not enable the bridge.
+hil-safety = []
+# HIL-only: HR-804 DAC -> three-ADC ramp self-check. Requires the J_SYNC jumper
+# connecting PA4 to the three current-sense inputs; without it the check reports
+# "no correlation" instead of passing.
+hil-dac-ramp = []
 
 [package]
 edition = "2021"

@@ -65,6 +65,10 @@ pub struct PwmState {
     pub nfault: bool,
     /// `nSLEEP` 是否拉高。
     pub n_sleep: bool,
+    /// `CCER` 原样（bit0/2/4 = CCxE，bit1/3/5 = CCxNE）。
+    pub ccer: u32,
+    /// 六路全关：`MOE=0` 且三对 `CCxE/CCxNE` 全 0。
+    pub outputs_off: bool,
 }
 
 /// TIM1 与六路栅极输入的所有者。
@@ -269,6 +273,8 @@ impl Pwm {
             bke: bdtr.bke(),
             nfault: self.n_fault.is_low(),
             n_sleep: self.n_sleep.is_set_high(),
+            ccer: r.ccer().read().0,
+            outputs_off: !bdtr.moe() && r.ccer().read().0 & 0x3F == 0,
         }
     }
 }

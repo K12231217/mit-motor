@@ -126,9 +126,12 @@ usage: cargo xtask <command> [args]
               against the FLASH length in software/firmware/memory.x
   flash       cargo run --release (probe-rs runner from .cargo/config.toml)
   rtt         probe-rs attach --chip <chip from .cargo/config.toml> [args]
-  hil [--boot-freeze] [--enable-zero]
+  hil [--boot-freeze] [--enable-zero] [--encoder-fsm] [--safety]
               build + flash + RTT from reset; log to .scratch/hil/run.log
               --boot-freeze holds TP2/PB7 high for 1 s at reset for probe capture
+              --encoder-fsm drives EncoderMonitor with live + synthetic valid frames
+              --safety logs the safe-off snapshot and marks nSLEEP->nFAULT on PB6
+              --dac-ramp runs HR-804 (needs the J_SYNC jumper; else reports no correlation)
               --enable-zero sets MOE with zero vector (no motor; current-limited)
   dac <1|2> <code>
               hold DAC1 channel on the target (e.g. `dac 2 4095` for TP2)
@@ -451,11 +454,22 @@ fn dac(args: &[String]) -> Result<(), String> {
 fn hil(args: &[String]) -> Result<(), String> {
     let mut boot_freeze = false;
     let mut enable_zero = false;
+    let mut encoder_fsm = false;
+    let mut safety = false;
+    let mut dac_ramp = false;
     for arg in args {
         match arg.as_str() {
             "--boot-freeze" => boot_freeze = true,
             "--enable-zero" => enable_zero = true,
-            _ => return Err("usage: cargo xtask hil [--boot-freeze] [--enable-zero]".to_string()),
+            "--encoder-fsm" => encoder_fsm = true,
+            "--safety" => safety = true,
+            "--dac-ramp" => dac_ramp = true,
+            _ => {
+                return Err(
+                    "usage: cargo xtask hil [--boot-freeze] [--enable-zero] [--encoder-fsm] [--safety] [--dac-ramp]"
+                        .to_string(),
+                )
+            }
         }
     }
     println!("HIL bench card (fixed test points, docs/instrumentation.md):");
@@ -472,6 +486,15 @@ fn hil(args: &[String]) -> Result<(), String> {
     }
     if enable_zero {
         features.push("hil-enable-zero");
+    }
+    if encoder_fsm {
+        features.push("hil-encoder-fsm");
+    }
+    if safety {
+        features.push("hil-safety");
+    }
+    if dac_ramp {
+        features.push("hil-dac-ramp");
     }
     if features.is_empty() {
         cargo(&["build", "--release"])?;

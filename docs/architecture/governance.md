@@ -469,6 +469,21 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 
 ---
 
+## 轮次 17：编码器状态机 / 保护默认态 / DAC-ADC 自检入口
+
+- 新增 HIL 能力（都是 `hil-*` feature，生产构建不受影响）：
+  - `--encoder-fsm`：用真实帧 + host 预算的合法帧驱动 `EncoderMonitor`，覆盖 `MagLock`、弱场 19/20/21 帧、跳变、全 0 护栏、`reset()` 与角度换算；12 项判据板上全过。
+  - `--safety`：初始化后与 `wake()` 后各打一条 `safety-*` 快照（`moe/aoe/bke/ccer/outputs_off/nsleep/nfault`），并用 PB6 标出唤醒窗口；`PwmState` 增加 `ccer` 与 `outputs_off`。
+  - `--dac-ramp`：HR-804 自检入口；无 J_SYNC 跳线时如实报 `follow=false`（本轮 BLOCKED，不是缺陷）。
+- 编码器发现：真实帧 `mag=10`（弱场 + 失锁位）会立即走 `MagLock` 锁存——无磁铁时角度不可用是**判据正确行为**，不是 bug。
+- 设计取舍：注入帧的 CRC 由 host 预算成常量，板上不复制 CRC 表；同时验证"CRC 表 + 判据"两侧一致。
+- 删除：无（新增能力）。临时 mode 扫描已在轮次 16 删除。
+- 行为基线：默认构建（无 feature）与上一轮一致，多出的只有 `driver woken us=…` 一行日志。
+- 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene`/`tier` 全 PASS；HIL 见 handoff §3。
+- 未决项：J_SYNC 跳线（HR-804）；示波器/LA 的物理波形由人接探头；软件 OVP、`CalibRecord`+flash、FDCAN1 尚未实现。
+
+---
+
 ## 轮次记录模板（下一轮起复制）
 
 ```md

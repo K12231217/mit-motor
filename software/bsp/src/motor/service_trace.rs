@@ -74,6 +74,12 @@ impl Trace {
         self.residual.set(Value::Bit12Right(code));
     }
 
+    /// 直接写 DAC1 原始码（12 bit，超出饱和）。只给台架自检用：HR-804 的
+    /// DAC → 三路 ADC 斜坡验证需要指定码，而不是安培。
+    pub fn set_dac1_code(&mut self, code: u16) {
+        self.residual.set(Value::Bit12Right(code.min(4095)));
+    }
+
     /// 20 kHz ISR 入口：TP_SYNC_LOOP 高。
     #[inline]
     pub fn sync_loop_high(&mut self) {

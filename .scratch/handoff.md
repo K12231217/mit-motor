@@ -81,6 +81,26 @@ HIL: PASS 2026-11-28 T-016 编码器 SPI bring-up（两片 MT6701 已焊、无�
 - `mag=10`：`Mg[1:0]=2`（磁场过弱）、`Mg[3]=1`（失锁/超速位，手册语义不确定）；无磁铁时角度不可用。
 - 未做：磁铁装配后的角度线性/零位/跳变、双编码器切换时序、20 kHz 任务内读取（SPI1 目前 init 用完即释放）。
 
+HIL: PASS 2026-11-28 T-016 编码器状态机（`cargo xtask hil --encoder-fsm`，无磁铁/电机）
+
+- 真实帧：`enc-fsm live-maglock tag=3 fault=2`（`Mg[3]=1` → 连续 2 帧锁存 `MagLock`）。
+- 弱场：19 帧 `MagWarn` → 第 20 帧 `Rejected(MagStuck)` → 第 21 帧锁存；全部与策略一致。
+- 跳变：`+40 LSB` 首帧 `Rejected(Jump)`、次帧锁存；`reset()` 后立即接受。
+- 全 0 护栏：从 16383 回绕后 7 帧 0 通过、第 8 帧 `ZeroFrame`、第 9 帧锁存。
+- 角度：1010 counts → `mrad=387`（2π·1010/16384），误差 < 0.1 mrad。
+- 汇总：`enc-fsm pass`（12/12 判据）。
+
+HIL: PASS 2026-11-28 保护/默认态快照（`--safety`）
+
+- 初始化后：`safety-off moe=false aoe=false bke=false ccer=0x0 off=true nsleep=false nfault=false`。
+- `wake()` 用时 10 ms（轮询粒度），`safety-wake moe=false ccer=0x0 off=true nsleep=true nfault=false`。
+- PB6 在唤醒窗口内保持高，LA 可直接量 PC7(nSLEEP)→PC8(nFAULT) 的先后与窗口关系。
+
+HIL: BLOCKED 2026-11-28 DAC→三路 ADC 斜坡（HR-804，`--dac-ramp`）
+
+- `dac-ramp code=512 … spread=7 follow=false`；`code=3584 … follow=false`；三路始终 ≈2039。
+- 判定：**J_SYNC 跳线未装**（PA4 未进电流采样输入），不是固件缺陷；装好后重跑 `cargo xtask hil --dac-ramp`。
+
 ## 4. 待裁决（人）
 
 - nSLEEP 唤醒时间缺 MP6540HA 手册确认（现实现：`wake` ≤100 ms 轮询 nFAULT，`enable` 另等 1 ms；多次 HIL 未见抖动）。
