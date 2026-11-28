@@ -120,6 +120,14 @@ HIL: PASS 2026-11-28 软件 OVP（D2 拆除后，12/24/27.5 V 三档）
 - 待确认（人 + 万用表）：PB11 对地电压在 0/12 V 时各是多少；R15（应为 100 kΩ）与
   R23（应为 8.06 kΩ）是否按 Schematic14_1 装配；板上实际是否为该版网表。
 
+HIL: PASS 2026-11-28 标定档案读取与 A/B 选择（`--calib-test`）
+
+- 首次：两槽空（`a=false b=false`）；写入后 `a=true seq=1`；再复位 `b=true seq=2`；再复位读出 `seq=2`。
+- 记录字段：`uid=400017-42535015`、`ovp_mv=27000`；48 B + CRC-32，`CalibRecord::decode` 拒绝错魔数/版本/CRC（host 测试）。
+- **写路径 BLOCKED**：`PNB=32` 与 `PNB=64` 置 `STRT` 后 `CR=0x4001_0102/0x4001_0202`、`SR=0x10000(BSY)`，完成后无错误标志（`SR=0`），但 `0x0804_0000` 不变（空白检查失败）。
+  `CALIB_WRITE_ENABLED=false`，`write()` 返回 `Disabled`（HIL 日志 `code=6`）；未确认 bank 2 页号前不再擦写。
+- 待确认：RM0440 的 PNB 与 bank 2 页号映射（2 KB 页、双 bank、128 KB）。
+
 ## 4. 待裁决（人）
 
 - nSLEEP 唤醒时间缺 MP6540HA 手册确认（现实现：`wake` ≤100 ms 轮询 nFAULT，`enable` 另等 1 ms；多次 HIL 未见抖动）。

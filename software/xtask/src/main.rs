@@ -132,6 +132,7 @@ usage: cargo xtask <command> [args]
               --encoder-fsm drives EncoderMonitor with live + synthetic valid frames
               --safety logs the safe-off snapshot and marks nSLEEP->nFAULT on PB6
               --dac-ramp runs HR-804 (needs the J_SYNC jumper; else reports no correlation)
+              --calib-test writes a calibration record into the older bank-2 slot
               --enable-zero sets MOE with zero vector (no motor; current-limited)
   dac <1|2> <code>
               hold DAC1 channel on the target (e.g. `dac 2 4095` for TP2)
@@ -457,6 +458,7 @@ fn hil(args: &[String]) -> Result<(), String> {
     let mut encoder_fsm = false;
     let mut safety = false;
     let mut dac_ramp = false;
+    let mut calib = false;
     for arg in args {
         match arg.as_str() {
             "--boot-freeze" => boot_freeze = true,
@@ -464,9 +466,10 @@ fn hil(args: &[String]) -> Result<(), String> {
             "--encoder-fsm" => encoder_fsm = true,
             "--safety" => safety = true,
             "--dac-ramp" => dac_ramp = true,
+            "--calib-test" => calib = true,
             _ => {
                 return Err(
-                    "usage: cargo xtask hil [--boot-freeze] [--enable-zero] [--encoder-fsm] [--safety] [--dac-ramp]"
+                    "usage: cargo xtask hil [--boot-freeze] [--enable-zero] [--encoder-fsm] [--safety] [--dac-ramp] [--calib-test]"
                         .to_string(),
                 )
             }
@@ -495,6 +498,9 @@ fn hil(args: &[String]) -> Result<(), String> {
     }
     if dac_ramp {
         features.push("hil-dac-ramp");
+    }
+    if calib {
+        features.push("hil-calib-test");
     }
     if features.is_empty() {
         cargo(&["build", "--release"])?;

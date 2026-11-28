@@ -29,11 +29,13 @@ use algorithms::{GainGate, GateParams};
 use bsp::motor::bus_adc::{Adc, AdcPins, AMPS_PER_LSB};
 use bsp::motor::bus_encoder::{Encoder, EncoderId, EncoderPins};
 use bsp::motor::bus_pwm::{Pwm, PwmPins};
+use bsp::motor::service_calib::{self, CalibSlot};
 use bsp::motor::service_clock;
 use bsp::motor::service_dwt::Dwt;
 use bsp::motor::service_timebase::{self, Timebase as ServiceTimebase};
 use bsp::motor::service_trace::{Trace, TracePins};
 use contracts::joint::config_budget::SYS_CLK_HZ;
+use contracts::motor::protocol_calib::{pick, CalibRecord};
 use embassy_stm32::pac::TIM1 as TIM1_REGS;
 use rtic::app;
 use rtic_monotonics::systick::prelude::*;
@@ -327,6 +329,55 @@ mod app {
             },
             TRACE_R_FULL_SCALE_AMPS,
         );
+
+        // 标定档案：两槽都读，CRC 通过才算数；新槽由 seq 大者胜。
+        let calib_a = CalibRecord::decode(&service_calib::read(CalibSlot::A)).ok();
+        let calib_b = CalibRecord::decode(&service_calib::read(CalibSlot::B)).ok();
+        let calib = pick(calib_a, calib_b);
+        defmt::info!(
+            "calib a={=bool} b={=bool} seq={=u32} uid={=u32:x}-{=u32:x} ovp_mv={=u16}",
+            calib_a.is_some(),
+            calib_b.is_some(),
+            calib.map(|r| r.seq).unwrap_or(0),
+            service_calib::uid96()[0],
+            service_calib::uid96()[1],
+            calib.map(|r| r.ovp_mv).unwrap_or(0)
+        );
+
+        #[cfg(feature = "hil-calib-test")]
+        {
+            // 写到"旧槽"：A 槽有效且 seq 不小于 B 时写 B，否则写 A。
+            let write_b = match (calib_a, calib_b) {
+                (Some(a), Some(b)) => a.seq >= b.seq,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            let next = CalibRecord {
+                seq: calib.map(|r| r.seq).unwrap_or(0) + 1,
+                board_uid: service_calib::uid96(),
+                zero_ma: [0, 0, 0],
+                gain_q14: [16_384, 16_384],
+                ovp_mv: algorithms::motor::config_policy::VBUS_OVP_MV as u16,
+            };
+            let slot = if write_b { CalibSlot::B } else { CalibSlot::A };
+            match service_calib::write(slot, &next.encode()) {
+                Ok(()) => {
+                    defmt::info!("calib write slot={=u8} seq={=u32}", write_b as u8, next.seq)
+                }
+                Err(e) => defmt::error!(
+                    "calib write failed code={=u8} sr=0x{=u32:x}",
+                    match e {
+                        bsp::motor::service_calib::CalibFlashError::Timeout => 1,
+                        bsp::motor::service_calib::CalibFlashError::Fault => 2,
+                        bsp::motor::service_calib::CalibFlashError::Verify => 3,
+                        bsp::motor::service_calib::CalibFlashError::Erase => 4,
+                        bsp::motor::service_calib::CalibFlashError::Program => 5,
+                        bsp::motor::service_calib::CalibFlashError::Disabled => 6,
+                    },
+                    service_calib::status_bits()
+                ),
+            }
+        }
 
         // 编码器 bring-up：两片 MT6701 已焊、暂无磁铁。这里只验证软件片选/SPI 时序与
         // CRC；角度语义（零位、跳变、磁场码）要等磁铁装好再测。SPI1 用完即交还，

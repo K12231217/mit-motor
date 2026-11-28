@@ -513,6 +513,21 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 
 ---
 
+## 轮次 20：标定档案落地（读取/CRC/A-B 已过，写入待页号映射）
+
+- 新增契约 `lib.motor.protocol_calib`：48 B 定长记录（magic/version/seq/UID/零位/增益/OVP/CRC-32），
+  `encode/decode/pick` 全纯函数；host 加 3 个测试（往返、坏魔数/版本/CRC、A/B 选择）。
+- 新增 `bsp.motor.service_calib`：bank 2 读取（memory-mapped）、96 bit UID、擦写骨架。
+- HIL（`--calib-test`，三次复位）：空槽 → 写 A(seq=1) → 复位读 A、写 B(seq=2) → 复位读 seq=2，**持久化成立**。
+- 写入异常：`PNB=32/64` + `STRT` 后 `CR` 显示 PER/PNB/STRT 正确、`SR.BSY=1`，完成后无任何错误标志，
+  但 `0x0804_0000` 内容未变。已把写路径关在 `CALIB_WRITE_ENABLED=false`（返回 `Disabled`），避免误擦。
+- 判定：不能把"没报错"当成功；PM 页号映射未确认前不做擦写。读取路径与记录格式可先给 `calib` 任务用。
+- 防回归：写路径默认关闭是编译期常量；读路径与解码有 host 测试 + HIL 共同覆盖。
+- 验证：`test`（145：92+44+3+6）/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene`/`tier` PASS。
+- 未决：RM0440 bank 2 页号；确认后只改 `BANK2_FIRST_PAGE` 与 `CALIB_WRITE_ENABLED` 两处。
+
+---
+
 ## 轮次记录模板（下一轮起复制）
 
 ```md

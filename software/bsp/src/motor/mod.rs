@@ -3,6 +3,7 @@
 pub mod bus_adc;
 pub mod bus_encoder;
 pub mod bus_pwm;
+pub mod service_calib;
 pub mod service_clock;
 pub mod service_dwt;
 pub mod service_timebase;

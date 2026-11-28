@@ -64,6 +64,7 @@ H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一�
 | `lib.motor.protocol_trust` | `software/contracts/src/motor/protocol_trust.rs` | `lib` | impl | Trust 枚举；Unknown=0 |
 | `lib.motor.protocol_types` | `software/contracts/src/motor/protocol_types.rs` | `lib` | impl | 物理量与定点类型；无策略 |
 | `lib.motor.config_hw` | `software/contracts/src/motor/config_hw.rs` | `lib` | impl | 器件事实与电气硬约束；编译期断言 |
+| `lib.motor.protocol_calib` | `software/contracts/src/motor/protocol_calib.rs` | `lib` | impl | 标定档案 48 B 布局、CRC-32、A/B 选择；纯函数 |
 | `lib.joint.config_budget` | `software/contracts/src/joint/config_budget.rs` | `lib` | impl | 系统预算；只读 |
 | `lib.joint.service_contracts` | `software/contracts/src/lib.rs` | `lib` | impl | crate 根与 re-export；无状态 |
 | `bsp.motor.service_clock` | `software/bsp/src/motor/service_clock.rs` | `init` | impl | HSE 16M/PLL 170M 配置与读回；不匹配进 fault |
@@ -73,6 +74,7 @@ H6 检查这张表：每个源码文件恰好被一个 path 覆盖、ID 唯一�
 | `bsp.motor.service_dwt` | `software/bsp/src/motor/service_dwt.rs` | `current @8` | impl | DWT CYCCNT；先开 DCB.TRCENA，再使能计数器 |
 | `bsp.motor.service_timebase` | `software/bsp/src/motor/service_timebase.rs` | `init` | impl | TIM5 1 MHz，defmt 时间戳；32 位回绕 |
 | `bsp.motor.service_trace` | `software/bsp/src/motor/service_trace.rs` | `current @8` | impl | PB6/PB7 TP_SYNC、DAC1 残差/冻结；无锁无日志 |
+| `bsp.motor.service_calib` | `software/bsp/src/motor/service_calib.rs` | `init` | impl | bank 2 标定槽读取与 UID；写路径待页号确认（`CALIB_WRITE_ENABLED=false`） |
 | `bsp.joint.service_board` | `software/bsp/src/lib.rs` | `init` | scaffold | Board 单实例；构造后 move 移交 |
 | `lib.motor.service_gate` | `software/algorithms/src/motor/service_gate` | `calib @2` | impl | GainGate 唯一写者；组窗不写主窗 |
 | `lib.motor.service_encoder` | `software/algorithms/src/motor/service_encoder` | `current @8` | impl | MT6701 帧判据纯函数；不持有 SPI1 总线 |
@@ -120,6 +122,7 @@ software/contracts/            # 零依赖、零 unsafe、host+target 双用（�
   src/motor/protocol_trust.rs    #   Trust
   src/motor/protocol_types.rs    #   Duty / DqTarget / RawSample3 / PhaseCurrent / Mode
   src/motor/config_hw.rs         #   器件事实与电气硬约束（D_MAX、采样窗口、MT6701 位宽）
+  src/motor/protocol_calib.rs    #   标定档案 48 B 布局、CRC-32、A/B 选择
 
 software/bsp/                  # 唯一 unsafe 层（包名 bsp）[clock/pwm/adc/dwt/timebase/trace 已实现]
   src/lib.rs            #   Board 类型与所有权表；init 仍是 todo!()
@@ -131,6 +134,7 @@ software/bsp/                  # 唯一 unsafe 层（包名 bsp）[clock/pwm/adc
   src/motor/service_dwt.rs     #   CYCCNT 计时与剖面（先 DCB.TRCENA）
   src/motor/service_timebase.rs#   TIM5 @1 MHz；defmt 时间戳
   src/motor/service_trace.rs  #   PB6/PB7 TP_SYNC + DAC1_OUT1/2 遥测
+  src/motor/service_calib.rs  #   bank 2 标定槽读取/UID；写路径暂关（页号映射待确认）
   src/motor/bus_dma.rs         #   [计划] 3 通道搬运与完成序
   src/motor/bus_can.rs         #   [计划] FDCAN2（embassy-stm32 包装，类型不外泄）
   src/joint/bus_uart.rs        #   [计划] 调试串口：最简阻塞写，fault dump 专用

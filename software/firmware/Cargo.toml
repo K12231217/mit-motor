@@ -52,6 +52,8 @@ hil-safety = []
 # connecting PA4 to the three current-sense inputs; without it the check reports
 # "no correlation" instead of passing.
 hil-dac-ramp = []
+# HIL-only: read both calibration slots, write a known record to the older one.
+hil-calib-test = []
 
 [package]
 edition = "2021"
