@@ -30,7 +30,7 @@ jobs:
       - run: cargo xtask test
       - run: cargo xtask doc
       - run: cargo xtask arch
-      # H2/H4/H5: no ownerless TODO, no history/process comments, every module
+      # H2/H4/H5/H6: no ownerless TODO, no history/process comments, every module
       # file listed in docs/software-architecture.md.
       - run: cargo xtask hygiene
       # H3: Tier B paths (software/firmware/, software/bsp/, software/system/, software/app/) need a

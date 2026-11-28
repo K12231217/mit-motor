@@ -143,7 +143,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 | R13 | `tier` 对注释级 bsp/firmware 改动也要求 HIL（路径粒度） | A | (a) 行级判断"只改注释则跳过"；(b) 接受摩擦，人决定是否开 hil-pending 分支 | (b) 不用启发式 |
 | R14 | `LSB_*` 等线协议常量未被编码函数引用 | A | (a) 编码/解码引用 `1.0/LSB_*`；(b) 保持内联，在常量上注明"文档值" | (b) 不碰 wire 语义 |
 
-状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；架构文档 §4–§10 纠偏完成（轮次 10）；状态字表示归一完成（轮次 11）；检查器自测完成（轮次 12）；R3 hold（§9-1）；R7/R9–R11、R13/R14 待做。
+状态：R1 完成（轮次 1）；R2/R5 完成（轮次 1/2）；R6 完成（轮次 3）；文档真实性完成（轮次 4）；工具链门禁完成（轮次 5/9）；seqlock 归一完成（轮次 6）；R4 完成（轮次 7，ADR-16/17）；注册表 state 门禁完成（轮次 8）；R12 完成（轮次 9）；架构文档 §4–§10 纠偏完成（轮次 10）；状态字表示归一完成（轮次 11）；检查器自测完成（轮次 12）；内存事实分层完成（轮次 13）；R3 hold（§9-1）；R7/R9–R11、R13/R14 待做。
 
 ### 9. 待确认（人）
 
@@ -386,6 +386,25 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 防回归约束：检查器行为回归会让 `cargo xtask test` FAIL；CI 已调用该命令。
 - 验证：`test`（141）/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
 - 未决项：`check_isr_purity` 的禁用词表（`defmt/.await/.lock(/unwrap(/expect(`）仍是文本匹配，宏展开后的形态不在覆盖内。
+
+---
+
+## 轮次 13：把"128 KB 器件"与"96 K/64 K 链接子集"分开写
+
+- 熵源：§5「数据访问/配置」附近；PRE-09（数字只由工具产生）
+- 调用方核实：
+  - `docs/INDEX.md:10` 只写"128 KB Flash / 128 KB SRAM"，而 `software/firmware/memory.x` 明确只链接 bank 1（64 KB）与 SRAM1+SRAM2（96 KB），并记录了 dual-bank 地址洞（0x0801_0000–0x0803_FFFF）与"按 128K 连续链接会下载失败"的实测。
+  - 两处都是事实，但只说器件容量会让下一位 agent 把 `memory.x` "修正"成 128K 连续，正好踩已知的下载失败。
+  - `.scratch/handoff.md` §2 未提本轮治理产出，下一个会话只能靠翻 commit 才知道门禁覆盖面变了。
+  - CI 注释仍写 `H2/H4/H5`，漏了 H6。
+- 选定方案：INDEX 主控行补一句"链接只用 bank1 64 KB + SRAM 96 KB，理由见 memory.x"；handoff §2 增加治理指针；CI 注释补 H6。
+- 放弃方案：把 128 KB 从 INDEX 删掉只留链接子集 —— 器件容量是选型事实，删了会让"换 RE 料号"的判断失去依据。
+- 行为基线：纯文档/注释；门禁输出不变。
+- 迁移完成：`docs/INDEX.md` §1、`.scratch/handoff.md` §2、`.github/workflows/ci.yml` 注释。
+- 删除的旧实现：无。
+- 防回归约束：无（数值与链接预算的权威在 `memory.x` 与 `cargo xtask size`）。
+- 验证：`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene` 全 PASS（提交回执）。
+- 未决项：`cargo xtask size` 的预算检查仍是"打印 vs memory.x 长度"，没有把"不得跨 bank"写成断言。
 
 ---
 

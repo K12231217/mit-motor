@@ -7,7 +7,7 @@
 
 | 项 | 值 |
 |---|---|
-| 主控 | STM32G474RBT6，LQFP64，128 KB Flash / 128 KB SRAM |
+| 主控 | STM32G474RBT6，LQFP64，128 KB Flash / 128 KB SRAM；链接只用 bank 1（64 KB）+ SRAM1/2（96 KB），理由与地址洞见 `software/firmware/memory.x` |
 | 板卡 | 2026-11-27 最新网表 `hardware/pcb/Netlist_Schematic14_1_2026-11-27.tel`；PCB14 是 G491RET6 旧板 |
 | 驱动 | MP6540HA（`MP6540HGU-A-Z`），HS/LS 六电平输入，无 EN、无内部死区 |
 | 电流采样 | 片内 OPAMP1/2/3 follower 接 SOx；标度唯一源 `contracts::motor::config_hw::SOX_AMPS_PER_LSB` |

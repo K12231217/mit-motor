@@ -18,6 +18,7 @@
 - T-012 的代码/文档改动与目录重排同批提交；`main` 仍只读回、不 `enable`。
 - T-010（远端）已并入：载波保持 20 kHz，`SinCos`/`PiOutput`/`1/vbus` 缓存等 P0/P1 优化保留。
 - 引脚/测试点只查 `docs/hardware-requirements.md` §3.1 / §4.3 / §5；不复制到别处。
+- 架构降熵治理：`docs/architecture/governance.md` 记有轮次 1–13 的熵源、方案、反证与验证；门禁现覆盖 firmware / 根 / xtask / bsp 四个 workspace，`cargo xtask test` 含检查器自测。
 - T-014 环：2048×16 B = 32 KiB `.bss`；512 预 + 1536 后触发；stride=1 → 102.4 ms，stride=10 → 1.024 s（见 `docs/instrumentation.md` §4.2）。
 
 ## 3. HIL
