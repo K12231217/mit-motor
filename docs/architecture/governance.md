@@ -465,7 +465,7 @@ xtask (host, 无 crate 依赖，shell 调 cargo/llvm)   rtic, rtic-sync, rtic-mo
 - 迁移：registry `bsp.motor.bus_encoder` scaffold→impl；bsp lib 文档；architecture §2 描述；handoff 新开 T-016（T-012 关闭，证据仍在 §3）。
 - 删除：临时 `set_mode` 调试方法与四模式扫描（只留 git 历史）。
 - 验证：`rel` 通过（flash 30,672 B / 46.8 %，+2 KB）；`test`/`fmt-check`/`clippy`/`doc`/`arch`/`hygiene`/`tier` 全 PASS（提交回执）。
-- 未决项：磁铁装配后的角度/磁码判据；SPI1 是否进 20 kHz 任务（ADR-08）待 FOC 集成；`cargo xtask build`（dev profile）链接溢出属既有问题，验收构型用 `rel`。
+- 未决项：磁铁装配后的角度/磁码判据；SPI1 是否进 20 kHz 任务（ADR-08）待 FOC 集成；`cargo xtask build`（dev profile）链接溢出：本次未追溯是否本次引入；验收构型是 `rel`，CI 也只跑 `rel`。
 
 ---
 
